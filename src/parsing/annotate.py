@@ -1,0 +1,93 @@
+"""Joins parsed diff files with per-class authorship into one annotated structure."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal, Optional
+
+from pydantic import BaseModel
+
+from src.parsing.diff_parser import DiffFile, load_diff, parse_diff
+from src.parsing.modified_lines_parser import (
+    ClassAuthorship,
+    load_modified_lines,
+    parse_modified_lines,
+)
+
+Author = Literal["Left", "Right"]
+
+
+class AnnotatedLine(BaseModel):
+    line_no: int
+    content: str
+    change_type: Literal["added", "removed", "context"]
+    author: Optional[Author] = None
+
+
+class AnnotatedFile(BaseModel):
+    path: str
+    class_name: Optional[str] = None
+    lines: list[AnnotatedLine]
+
+
+def _author_for_line(
+    authorship: Optional[ClassAuthorship], line_no: int, change_type: str
+) -> Optional[Author]:
+    if authorship is None:
+        return None
+    if change_type == "added":
+        if line_no in authorship.left_added:
+            return "Left"
+        if line_no in authorship.right_added:
+            return "Right"
+    elif change_type == "removed":
+        if line_no in authorship.left_deleted:
+            return "Left"
+        if line_no in authorship.right_deleted:
+            return "Right"
+    return None
+
+
+def annotate_diff_files(
+    diff_files: list[DiffFile], authorship_by_class: dict[str, ClassAuthorship]
+) -> list[AnnotatedFile]:
+    annotated: list[AnnotatedFile] = []
+
+    for diff_file in diff_files:
+        authorship = (
+            authorship_by_class.get(diff_file.class_name)
+            if diff_file.class_name
+            else None
+        )
+        annotated_lines = [
+            AnnotatedLine(
+                line_no=line.line_no,
+                content=line.content,
+                change_type=line.change_type,
+                author=_author_for_line(authorship, line.line_no, line.change_type),
+            )
+            for line in diff_file.lines
+        ]
+        annotated.append(
+            AnnotatedFile(
+                path=diff_file.path,
+                class_name=diff_file.class_name,
+                lines=annotated_lines,
+            )
+        )
+
+    return annotated
+
+
+def build_annotated_diff(diff_text: str, modified_lines_text: str) -> list[AnnotatedFile]:
+    diff_files = parse_diff(diff_text)
+    authorship_by_class = parse_modified_lines(modified_lines_text)
+    return annotate_diff_files(diff_files, authorship_by_class)
+
+
+def load_annotated_diff(
+    diff_path: str | Path, modified_lines_path: str | Path
+) -> list[AnnotatedFile]:
+    diff_files = load_diff(diff_path)
+    authorship_by_class = load_modified_lines(modified_lines_path)
+    return annotate_diff_files(diff_files, authorship_by_class)
