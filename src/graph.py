@@ -12,8 +12,10 @@ from pydantic import BaseModel
 from src.config import AppConfig
 from src.llm_providers import build_chat_model
 from src.output import write_output
-from src.parsing.annotate import AnnotatedFile, load_annotated_diff
+from src.parsing.annotate import AnnotatedFile, annotate_diff_files
 from src.parsing.dependency_parser import DependencySet, load_dependencies
+from src.parsing.diff_parser import load_diff
+from src.parsing.modified_lines_parser import load_modified_lines
 from src.prompts.mode_detect import build_detect_messages
 from src.prompts.mode_review import build_review_messages
 from src.schemas import Mode1Result, Mode2Result
@@ -42,12 +44,15 @@ def _extract_json_object(text: str) -> dict:
 
 def load_inputs(state: GraphState) -> dict:
     config = state["config"]
-    annotated_diff = load_annotated_diff(
-        config.input.diff_file, config.input.modified_lines_file
-    )
+    authorship_by_class = load_modified_lines(config.input.modified_lines_file)
+    diff_files = load_diff(config.input.diff_file)
+    annotated_diff = annotate_diff_files(diff_files, authorship_by_class)
+
     dependencies = None
     if config.mode == "review":
-        dependencies = load_dependencies(config.input.dependencies_file)
+        dependencies = load_dependencies(
+            config.input.dependencies_file, authorship_by_class
+        )
     return {"annotated_diff": annotated_diff, "dependencies": dependencies}
 
 

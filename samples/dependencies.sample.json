@@ -1,18 +1,136 @@
+[
 {
-  "_comment": "PLACEHOLDER schema for Mode 2 input. Replace with the real output format of your static-analysis tool once available; src/parsing/dependency_parser.py will be adjusted to match it.",
-  "dependencies": [
-    {
-      "type": "Direct Flow",
-      "left_lines": [
-        {"class": "org.example.Clue", "line": 41}
-      ],
-      "right_lines": [
-        {"class": "org.example.Clue", "line": 54}
-      ],
-      "path": [
-        {"class": "org.example.Clue", "line": 41, "statement": "this.significance = Math.max(Math.min(significance,10), 0);"},
-        {"class": "org.example.Clue", "line": 54, "statement": "return this.significance < -10 || this.significance > 10;"}
-      ]
-    }
-  ]
+	"type": "OAINTER",
+	"label": "OA conflict",
+	"body": {
+		"description": "this.<org.example.Clue: int significance> - this.<org.example.Clue: int significance>",
+		"interference": [
+			{
+				"type": "declaration",
+				"branch": "L",
+				"text": "this.<org.example.Clue: int significance> = $stack6",
+				"location": {
+					"file": "",
+					"class": "org.example.Clue",
+					"method": "<init>",
+					"line": 22
+				},
+				"stackTrace": [{
+	"class": "org.example.Main",
+	"method": "main",
+	"line": 9
+},{
+	"class": "org.example.Clue",
+	"method": "<init>",
+	"line": 22
+}]
+			},
+			{
+				"type": "override",
+				"branch": "R",
+				"text": "this.<org.example.Clue: int significance> = $stack6",
+				"location": {
+					"file": "",
+					"class": "org.example.Clue",
+					"method": "<init>",
+					"line": 22
+				},
+				"stackTrace": [{
+	"class": "org.example.Main",
+	"method": "main",
+	"line": 9
+},{
+	"class": "org.example.Clue",
+	"method": "<init>",
+	"line": 22
+}]
+			}
+		]
+	}
 }
+
+,
+
+{
+"type": "CONFLICT",
+"label": "SVFA conflict",
+"body": {
+  "description": "<java.io.PrintStream: void println(java.lang.String)> - <java.io.PrintStream: void println(java.lang.String)>",
+  "interference": [{
+"type": "SourceNode",
+"branch":"",
+"text": "$stack3 = <java.lang.System: java.io.PrintStream err>",
+"location": {
+  "file": "",
+  "class": "org.example.Clue",
+  "method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+  "line": "19"
+},
+"stackTrace": [{
+"class": "org.example.Clue",
+"method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+"line": "19"}]
+}, {
+"type": "SinkNode",
+"branch":"",
+"text": "virtualinvoke $stack3.<java.io.PrintStream: void println(java.lang.String)>($stack4)",
+"location": {
+  "file": "",
+  "class": "org.example.Clue",
+  "method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+  "line": "19"
+},
+"stackTrace": [{
+"class": "org.example.Clue",
+"method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+"line": "19"}]
+}]
+}
+}
+
+,
+
+{
+"type": "CONFLICT",
+"label": "SVFA conflict",
+"body": {
+  "description": "<java.io.PrintStream: void println(java.lang.String)> - <java.io.PrintStream: void println(java.lang.String)>",
+  "interference": [{
+"type": "SourceNode",
+"branch":"",
+"text": "$stack4 = dynamicinvoke 'makeConcatWithConstants' <java.lang.String (int)>(significance) <java.lang.invoke.StringConcatFactory: java.lang.invoke.CallSite makeConcatWithConstants(java.lang.invoke.MethodHandles$Lookup,java.lang.String,java.lang.invoke.MethodType,java.lang.String,java.lang.Object[])>('Clamping significance u0001to range [0, 10]')",
+"location": {
+  "file": "",
+  "class": "org.example.Clue",
+  "method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+  "line": "19"
+},
+"stackTrace": [{
+"class": "org.example.Main",
+"method": "<org.example.Main: void main(java.lang.String[])>",
+"line": "9"},{
+"class": "org.example.Clue",
+"method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+"line": "19"}]
+}, {
+"type": "SinkNode",
+"branch":"",
+"text": "virtualinvoke $stack3.<java.io.PrintStream: void println(java.lang.String)>($stack4)",
+"location": {
+  "file": "",
+  "class": "org.example.Clue",
+  "method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+  "line": "19"
+},
+"stackTrace": [{
+"class": "org.example.Main",
+"method": "<org.example.Main: void main(java.lang.String[])>",
+"line": "9"},{
+"class": "org.example.Clue",
+"method": "<org.example.Clue: void <init>(java.lang.String,int)>",
+"line": "19"}]
+}]
+}
+}
+
+]

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from src.parsing.dependency_parser import DependencySet, LineRef
+from src.parsing.dependency_parser import DependencySet, InterferenceNode, PathStep
 
 
-def _render_line_refs(refs: list[LineRef]) -> str:
-    return ", ".join(f"{ref.class_name}:{ref.line}" for ref in refs)
+def _render_path_step(step: PathStep) -> str:
+    tag = f" [{step.author}]" if step.author else ""
+    return f"{step.class_name}:{step.line}{tag} ({step.method})"
+
+
+def _render_node(node: InterferenceNode) -> str:
+    branch_tag = f" (reported branch: {node.branch})" if node.branch else ""
+    path_str = " -> ".join(_render_path_step(step) for step in node.path)
+    return f"   - {node.role}{branch_tag}: {node.text}\n     path: {path_str}"
 
 
 def render_dependencies(dependencies: DependencySet) -> str:
@@ -16,11 +23,8 @@ def render_dependencies(dependencies: DependencySet) -> str:
     blocks: list[str] = ["Dependencies already found by static analysis:"]
     for i, dep in enumerate(dependencies.dependencies, start=1):
         blocks.append(f"{i}. Type: {dep.type}")
-        blocks.append(f"   Left lines: {_render_line_refs(dep.left_lines)}")
-        blocks.append(f"   Right lines: {_render_line_refs(dep.right_lines)}")
-        path_str = " -> ".join(
-            f"{step.class_name}:{step.line} ({step.statement})" for step in dep.path
-        )
-        blocks.append(f"   Path: {path_str}")
+        blocks.append(f"   Description: {dep.description}")
+        for node in dep.nodes:
+            blocks.append(_render_node(node))
 
     return "\n".join(blocks)
