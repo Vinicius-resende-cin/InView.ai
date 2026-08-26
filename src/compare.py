@@ -94,7 +94,7 @@ def load_llm_result(path: str | Path) -> Mode1Result:
 
 def compare(llm_result: Mode1Result, tool_deps: DependencySet) -> list[dict]:
     rows: list[dict] = []
-    total_llm = total_tool = total_matched = 0
+    total_llm = total_tool = total_added_llm = total_added_tool = 0
 
     for dep_type in DEPENDENCY_TYPES:
         llm_of_type = [
@@ -108,48 +108,61 @@ def compare(llm_result: Mode1Result, tool_deps: DependencySet) -> list[dict]:
             if d.type == dep_type
         ]
         matched = _greedy_match(llm_of_type, tool_of_type)
+        added_llm = len(llm_of_type) - matched
+        added_tool = len(tool_of_type) - matched
 
         rows.append(
             {
                 "type": dep_type,
                 "detected_by_llm": len(llm_of_type),
                 "found_by_tool": len(tool_of_type),
-                "found_by_both": matched,
+                "added_llm": added_llm,
+                "added_tool": added_tool,
             }
         )
         total_llm += len(llm_of_type)
         total_tool += len(tool_of_type)
-        total_matched += matched
+        total_added_llm += added_llm
+        total_added_tool += added_tool
 
     rows.append(
         {
             "type": "Total",
             "detected_by_llm": total_llm,
             "found_by_tool": total_tool,
-            "found_by_both": total_matched,
+            "added_llm": total_added_llm,
+            "added_tool": total_added_tool,
         }
     )
     return rows
 
 
 def write_csv(rows: list[dict], path: str | Path) -> None:
-    fieldnames = ["type", "detected_by_llm", "found_by_tool", "found_by_both"]
+    fieldnames = ["type", "detected_by_llm", "found_by_tool", "added_llm", "added_tool"]
+    header_labels = {
+        "detected_by_llm": "Detected (LLM)",
+        "found_by_tool": "Found (tool)",
+        "added_llm": "Added (LLM)",
+        "added_tool": "Added (tool)",
+    }
     with Path(path).open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+        writer = csv.writer(f)
+        writer.writerow(["type"] + [header_labels[name] for name in fieldnames[1:]])
+        for row in rows:
+            writer.writerow([row[name] for name in fieldnames])
 
 
 def print_table(rows: list[dict]) -> None:
     header = (
-        f"{'Type':<24}{'Detected (LLM)':>16}{'Found (tool)':>14}{'Found by both':>16}"
+        f"{'Type':<24}{'Detected (LLM)':>16}{'Found (tool)':>14}"
+        f"{'Added (LLM)':>14}{'Added (tool)':>14}"
     )
     print(header)
     print("-" * len(header))
     for row in rows:
         print(
             f"{row['type']:<24}{row['detected_by_llm']:>16}"
-            f"{row['found_by_tool']:>14}{row['found_by_both']:>16}"
+            f"{row['found_by_tool']:>14}{row['added_llm']:>14}{row['added_tool']:>14}"
         )
 
 
