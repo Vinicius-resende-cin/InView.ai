@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any, Optional, TypedDict
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
@@ -73,6 +74,7 @@ def call_llm(state: GraphState) -> dict:
     result_model = _result_model_for_mode(config.mode)
     model = build_chat_model(config.llm)
 
+    # Tier 1: provider-native structured output (tool calling / JSON mode).
     try:
         structured_model = model.with_structured_output(result_model)
         result = structured_model.invoke(messages)
@@ -82,25 +84,36 @@ def call_llm(state: GraphState) -> dict:
             "parse_error": None,
         }
     except Exception as structured_exc:
-        response = model.invoke(messages)
-        raw_text = getattr(response, "content", str(response))
-        try:
-            parsed = result_model.model_validate(_extract_json_object(raw_text))
-            return {
-                "structured_result": parsed.model_dump(),
-                "raw_response": raw_text,
-                "parse_error": None,
-            }
-        except Exception as parse_exc:
-            return {
-                "structured_result": None,
-                "raw_response": raw_text,
-                "parse_error": (
-                    f"structured_output failed ({type(structured_exc).__name__}: "
-                    f"{structured_exc}); fallback JSON parse also failed "
-                    f"({type(parse_exc).__name__}: {parse_exc})"
-                ),
-            }
+        errors = [f"structured_output failed ({type(structured_exc).__name__}: {structured_exc})"]
+
+    # Tier 2: plain-text call with explicit JSON-format instructions appended,
+    # for providers/models that don't support tool calling or JSON mode.
+    format_instructions = PydanticOutputParser(pydantic_object=result_model).get_format_instructions()
+    instructed_messages = messages + [
+        HumanMessage(
+            content=(
+                "Respond with ONLY a single JSON object (no markdown code "
+                "fences, no extra prose before or after it) matching this "
+                f"schema:\n\n{format_instructions}"
+            )
+        )
+    ]
+    response = model.invoke(instructed_messages)
+    raw_text = getattr(response, "content", str(response))
+    try:
+        parsed = result_model.model_validate(_extract_json_object(raw_text))
+        return {
+            "structured_result": parsed.model_dump(),
+            "raw_response": raw_text,
+            "parse_error": None,
+        }
+    except Exception as parse_exc:
+        errors.append(f"format-instructed JSON parse also failed ({type(parse_exc).__name__}: {parse_exc})")
+        return {
+            "structured_result": None,
+            "raw_response": raw_text,
+            "parse_error": "; ".join(errors),
+        }
 
 
 def save_output(state: GraphState) -> dict:
