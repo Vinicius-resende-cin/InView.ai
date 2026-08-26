@@ -1,0 +1,70 @@
+# Configuration for the semantic-dependency code-review experiment.
+#
+# mode:
+#   detect  -> Mode 1: ask the LLM to find semantic dependencies itself.
+#   review  -> Mode 2: give the LLM the dependencies already found by static
+#              analysis (see input.dependencies_file) and ask it to review the merge.
+mode: detect
+
+llm:
+  # provider: one of "ollama", "gemini", "openrouter"
+  provider: ollama
+  model: llama3.1
+  temperature: 0.0
+  max_tokens: 4096
+  # api_key: name of the environment variable holding the API key
+  # (required for "gemini" and "openrouter"; ignored for "ollama")
+  api_key_env: null
+  # base_url: only used for "ollama" (defaults to http://localhost:11434) or to
+  # override OpenRouter's default endpoint.
+  base_url: null
+
+input:
+  diff_file: samples/diff.txt
+  modified_lines_file: samples/modified-lines.txt
+  # only required when mode: review
+  dependencies_file: samples/dependencies.sample.json
+
+output:
+  path: output.json
+
+# Semantic dependency types the pipeline knows about. Definitions are adapted
+# from Jesus et al., "Comparing static analyses for improved semantic conflict
+# detection" (Automated Software Engineering, 2026), restricted to the three
+# analyses this project targets: Direct Flow, Overriding Assignment, and
+# Confluence Flow.
+#
+# `detect: true` means the type is included in Mode 1's "which dependencies to
+# look for" instructions. All three are always included in the shared
+# definitions block given to the LLM in both modes.
+dependency_types:
+  - name: Direct Flow
+    detect: true
+    definition: >
+      A Direct Flow dependency exists when there is a path in the data-flow
+      graph from a state element written or used in a line changed by one
+      developer to a state element written or used in a line changed by the
+      other developer, or vice versa. In other words, one developer's change
+      affects (through data flow) a value that the other developer's change
+      reads or otherwise depends on. State elements include instance fields,
+      static fields, local variables, method parameters, and array elements.
+
+  - name: Overriding Assignment
+    detect: true
+    definition: >
+      An Overriding Assignment dependency exists when a state element
+      modified by one developer is subsequently overwritten by a
+      modification introduced by the other developer, with no intermediate
+      write to that state element from the common base version between the
+      two changes. Both developers write the same state element, and one
+      change silently discards the effect of the other.
+
+  - name: Confluence Flow
+    detect: true
+    definition: >
+      A Confluence Flow dependency exists when data-flow paths originating
+      from distinct modifications made by each developer converge at a
+      common program point that affects the same state element (for
+      example, both values are combined in the same later expression or
+      statement), even though the two developers modified different
+      variables or state elements initially.

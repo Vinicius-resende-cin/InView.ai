@@ -1,0 +1,23 @@
+Class: org.example.Main
+Left added lines: [7]
+Left deleted lines: []
+Right added lines: [9]
+Right deleted lines: []
+
+Class: org.example.Clue
+Left added lines: [18, 19, 20, 21, 22, 40, 41, 42]
+Left deleted lines: []
+Right added lines: [53, 54, 55]
+Right deleted lines: []
+
+Class: org.example.CaseFile
+Left added lines: [23]
+Left deleted lines: []
+Right added lines: []
+Right deleted lines: []
+
+Class: org.example.Detective
+Left added lines: []
+Left deleted lines: []
+Right added lines: [50, 51, 46, 47]
+Right deleted lines: []

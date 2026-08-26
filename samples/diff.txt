@@ -1,0 +1,224 @@
+diff --git a/src/main/java/org/example/CaseFile.java b/src/main/java/org/example/CaseFile.java
+index 8be278e..0460e61 100644
+--- a/src/main/java/org/example/CaseFile.java
++++ b/src/main/java/org/example/CaseFile.java
+@@ -1,44 +1,44 @@
+ package org.example;
+ import java.util.ArrayList;
+ import java.util.List;
+
+ public class CaseFile {
+     private String caseName;
+     private List<Clue> clues;
+
+     public CaseFile(String caseName) {
+         this.caseName = caseName;
+         this.clues = new ArrayList<>();
+     }
+
+     public String getCaseName() { return caseName; }
+
+     public void addClue(Clue clue) { this.clues.add(clue); }
+     public List<Clue> getClues() { return  clues; }
+
+     public List<Clue> cluesContaining(String text) {
+         List<Clue> relevantClues = new ArrayList<>();
+
+         for (Clue clue : clues) {
+-            if (clue.contains(text)) {
++            if (clue.contains(text, false)) { // previous change
+                 relevantClues.add(clue);
+             }
+         }
+
+         return relevantClues;
+     }
+
+     public Clue getMostSignificantClue() {
+         Clue mostSignificantClue = null;
+         int maxSignificance = -1;
+
+         for (Clue clue : clues) {
+             if (clue.getSignificance() > maxSignificance) {
+                 mostSignificantClue = clue;
+                 maxSignificance = clue.getSignificance();
+             }
+         }
+
+         return mostSignificantClue;
+     }
+ }
+diff --git a/src/main/java/org/example/Clue.java b/src/main/java/org/example/Clue.java
+index c2ebed3..21fa06d 100644
+--- a/src/main/java/org/example/Clue.java
++++ b/src/main/java/org/example/Clue.java
+@@ -1,27 +1,56 @@
+ package org.example;
+
+ public class Clue {
+     private String description;
+     private int significance;
+
++    /** // Current change
++     * Constructs a new {@link Clue} with the given description.
++     *
++     * @param description The textual description of the {@link Clue}
++     * @param significance The significance of the clue. Normal significance
++     *                     is in the range [-10, 10]
++     */
+     public Clue(String description, int significance) {
+         this.description = description;
+-        this.significance = significance;
++
++        // Previous change
++        if (significance < 0 || significance > 10) {
++            System.err.println("Clamping significance " + significance + "to range [0, 10]");
++        }
++
++        this.significance = Math.max(Math.min(significance,10), 0); // Previous change
+     }
+
+     /** Textual description of the {@link Clue} */
+     public String getDescription() { return description; }
+-    /** Significance of the clue between 0 (Insignificant) and 10 (Very Significant) */
++    /** @return The significance of the {@link Clue} in the range of [0, 10] */ // Previous change
+     public int getSignificance() { return significance; }
+
+     /**
+      * Determines whether this {@link Clue} contains the given text in its
+      * description.
+      *
+      * @param text The text to look for
++     * @param ignoreCase Whether to ignore case in the comparison // previous change
+      * @return True iff the text is in this {@link Clue Clues} description
+      */
+-    public boolean contains(String text) {
++    // previous change
++    public boolean contains(String text, boolean ignoreCase) {
++        if (ignoreCase) {
++            return description.toLowerCase().contains(text.toLowerCase());
++    }
+         return description.contains(text);
+     }
++
++    /** // Current change
++     * Returns wether this clue is either very insignificant (< - 10)
++     * or unusually significant (> 10).
++     *
++     * @return True iff the {@link Clue} has an unusual significance
++     *         which will be clamped
++     */
++    public boolean unusualSignificance() { // Current change
++        return this.significance < -10 || this.significance > 10;
++    }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/org/example/Detective.java b/src/main/java/org/example/Detective.java
+index 2209384..b849e95 100644
+--- a/src/main/java/org/example/Detective.java
++++ b/src/main/java/org/example/Detective.java
+@@ -1,68 +1,76 @@
+ package org.example;
+ import java.util.ArrayList;
+ import java.util.List;
+
+ public class Detective {
+-    private String name;
+-    private List<CaseFile> caseFiles;
++    /** The name of this detective. */
++    private final String name; // current change
++    /** The case files currently assigned to this detective. */
++    private final List<CaseFile> caseFiles; // current change
+
+     public Detective(String name) {
+         this.name = name;
+         this.caseFiles = new ArrayList<>();
+     }
+-
++    /**
++   * Adds the given {@link CaseFile} to the ones this {@link Detective Detectives} case load. // current change
++   *
++   * @param caseFile The {@link CaseFile} to add to the ones to be solved by this {@link Detective} // current change
++   */
+     public void addCaseFile(CaseFile caseFile) {
+         this.caseFiles.add(caseFile);
+     }
+
+     public void solveCase(CaseFile caseFile) {
+         String caseName = caseFile.getCaseName();
+         System.out.println("Detective " + name + " is solving case: " + caseName);
+
+         List<Clue> clues = caseFile.getClues();
+         float averageSignificance;
+
+         if (clues.isEmpty()) {
+             averageSignificance = 0;
+         } else {
+             int totalSignificance = 0;
+
+             for (Clue clue : clues) {
+                 totalSignificance += clue.getSignificance();
+             }
+
+             averageSignificance =  (float) totalSignificance / clues.size();
+         }
+
+         final float SIGNIFICANCE_THRESHOLD = 7.0f;
+
+         if (averageSignificance >= SIGNIFICANCE_THRESHOLD) {
+-            System.out.println("The case \"" + caseName + "\" is considered solved with an average significance of: " + averageSignificance);
++            System.out.println("The case \"" + caseName + "\" is considered solved with an " +
++                                "average significance of: " + averageSignificance); // current change
+             caseFiles.remove(caseFile);
+         } else {
+-            System.out.println("The case \"" + caseName + "\" is not yet solved. Average significance: " + averageSignificance);
++            System.out.println("The case \"" + caseName + "\" is not yet solved. " +
++                                "Average significance: " + averageSignificance); // current change
+         }
+
+         Clue mostSigClue = caseFile.getMostSignificantClue();
+         if (mostSigClue != null) {
+             System.out.println("Most Significant Clue Description: " + mostSigClue.getDescription());
+             System.out.println("Most Significant Clue Weight: " + mostSigClue.getSignificance());
+         } else {
+             System.out.println("No clues available to solve the case.");
+         }
+
+         boolean found = findKeywordInCases("VIP");
+         if (found) {
+             System.out.println("Detective " + name + " still has a VIP case assigned");
+         }
+     }
+
+     public boolean findKeywordInCases(String keyword) {
+         for (CaseFile caseFile : caseFiles) {
+             if (!caseFile.cluesContaining(keyword).isEmpty()) {
+                 return true;
+             }
+         }
+         return false;
+     }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/org/example/Main.java b/src/main/java/org/example/Main.java
+index c3382be..b319d5b 100644
+--- a/src/main/java/org/example/Main.java
++++ b/src/main/java/org/example/Main.java
+@@ -1,13 +1,13 @@
+ package org.example;
+
+ public class Main {
+     public static void main(String[] args) {
+-
+-        Detective sherlock = new Detective("Sherlock Holmes");
+
++        Detective sherlock = new Detective("Sherlock Holmes");
++        System.out.println("Creating CaseFile"); // Previous change
+         CaseFile case1 = new CaseFile("Museum Robbery");
+-        case1.addClue(new Clue("footprints found on back window", 5));
++        case1.addClue(new Clue("footprints found on back window", 11)); // Current change
+         sherlock.addCaseFile(case1);
+         sherlock.solveCase(case1);
+     }
+ }
+\ No newline at end of file

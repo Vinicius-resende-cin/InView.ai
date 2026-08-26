@@ -1,0 +1,18 @@
+{
+  "_comment": "PLACEHOLDER schema for Mode 2 input. Replace with the real output format of your static-analysis tool once available; src/parsing/dependency_parser.py will be adjusted to match it.",
+  "dependencies": [
+    {
+      "type": "Direct Flow",
+      "left_lines": [
+        {"class": "org.example.Clue", "line": 41}
+      ],
+      "right_lines": [
+        {"class": "org.example.Clue", "line": 54}
+      ],
+      "path": [
+        {"class": "org.example.Clue", "line": 41, "statement": "this.significance = Math.max(Math.min(significance,10), 0);"},
+        {"class": "org.example.Clue", "line": 54, "statement": "return this.significance < -10 || this.significance > 10;"}
+      ]
+    }
+  ]
+}
