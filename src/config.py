@@ -39,6 +39,16 @@ class OutputConfig(BaseModel):
     path: Path
 
 
+class AgentConfig(BaseModel):
+    """Connection settings for the opencode server that runs the review agents."""
+
+    base_url: str = "http://localhost:4096"
+    # If no server is reachable at base_url, spawn `opencode serve` ourselves.
+    auto_start: bool = True
+    startup_timeout: float = 30.0
+    request_timeout: float = 600.0
+
+
 class DependencyTypeConfig(BaseModel):
     name: str
     detect: bool = True
@@ -50,6 +60,7 @@ class AppConfig(BaseModel):
     llm: LLMConfig
     input: InputConfig
     output: OutputConfig
+    agent: AgentConfig = Field(default_factory=AgentConfig)
     dependency_types: list[DependencyTypeConfig] = Field(default_factory=list)
 
     @model_validator(mode="after")

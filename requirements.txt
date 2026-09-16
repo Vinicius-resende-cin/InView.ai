@@ -1,8 +1,5 @@
 langgraph>=0.2
 langchain-core>=0.3
-langchain-ollama>=0.2
-langchain-google-genai>=2.0
-langchain-openai>=0.2
 pydantic>=2.7
 PyYAML>=6.0
 unidiff>=0.7

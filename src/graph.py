@@ -1,17 +1,15 @@
-"""LangGraph pipeline: load inputs -> build prompt -> call LLM -> save output."""
+"""LangGraph pipeline: load inputs -> build prompt -> call agent -> save output."""
 
 from __future__ import annotations
 
-import json
 from typing import Any, Optional, TypedDict
 
-from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.messages import BaseMessage
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
+from src.agent_client import run_agent
 from src.config import AppConfig
-from src.llm_providers import build_chat_model
 from src.output import write_output
 from src.parsing.annotate import AnnotatedFile, annotate_diff_files
 from src.parsing.dependency_parser import DependencySet, load_dependencies
@@ -36,11 +34,8 @@ def _result_model_for_mode(mode: str) -> type[BaseModel]:
     return Mode1Result if mode == "detect" else Mode2Result
 
 
-def _extract_json_object(text: str) -> dict:
-    """Find and parse the first top-level JSON object in `text`."""
-    start = text.index("{")
-    obj, _ = json.JSONDecoder().raw_decode(text, start)
-    return obj
+def _agent_name_for_mode(mode: str) -> str:
+    return "dependency-detector" if mode == "detect" else "dependency-reviewer"
 
 
 def load_inputs(state: GraphState) -> dict:
@@ -68,52 +63,19 @@ def build_prompt(state: GraphState) -> dict:
     return {"messages": messages}
 
 
-def call_llm(state: GraphState) -> dict:
+def call_agent(state: GraphState) -> dict:
     config = state["config"]
     messages = state["messages"]
     result_model = _result_model_for_mode(config.mode)
-    model = build_chat_model(config.llm)
 
-    # Tier 1: provider-native structured output (tool calling / JSON mode).
-    try:
-        structured_model = model.with_structured_output(result_model)
-        result = structured_model.invoke(messages)
-        return {
-            "structured_result": result.model_dump(),
-            "raw_response": None,
-            "parse_error": None,
-        }
-    except Exception as structured_exc:
-        errors = [f"structured_output failed ({type(structured_exc).__name__}: {structured_exc})"]
-
-    # Tier 2: plain-text call with explicit JSON-format instructions appended,
-    # for providers/models that don't support tool calling or JSON mode.
-    format_instructions = PydanticOutputParser(pydantic_object=result_model).get_format_instructions()
-    instructed_messages = messages + [
-        HumanMessage(
-            content=(
-                "Respond with ONLY a single JSON object (no markdown code "
-                "fences, no extra prose before or after it) matching this "
-                f"schema:\n\n{format_instructions}"
-            )
-        )
-    ]
-    response = model.invoke(instructed_messages)
-    raw_text = getattr(response, "content", str(response))
-    try:
-        parsed = result_model.model_validate(_extract_json_object(raw_text))
-        return {
-            "structured_result": parsed.model_dump(),
-            "raw_response": raw_text,
-            "parse_error": None,
-        }
-    except Exception as parse_exc:
-        errors.append(f"format-instructed JSON parse also failed ({type(parse_exc).__name__}: {parse_exc})")
-        return {
-            "structured_result": None,
-            "raw_response": raw_text,
-            "parse_error": "; ".join(errors),
-        }
+    return run_agent(
+        agent_config=config.agent,
+        llm_config=config.llm,
+        agent_name=_agent_name_for_mode(config.mode),
+        system_text=str(messages[0].content),
+        human_text=str(messages[1].content),
+        result_model=result_model,
+    )
 
 
 def save_output(state: GraphState) -> dict:
@@ -125,13 +87,13 @@ def build_graph():
     graph = StateGraph(GraphState)
     graph.add_node("load_inputs", load_inputs)
     graph.add_node("build_prompt", build_prompt)
-    graph.add_node("call_llm", call_llm)
+    graph.add_node("call_agent", call_agent)
     graph.add_node("save_output", save_output)
 
     graph.set_entry_point("load_inputs")
     graph.add_edge("load_inputs", "build_prompt")
-    graph.add_edge("build_prompt", "call_llm")
-    graph.add_edge("call_llm", "save_output")
+    graph.add_edge("build_prompt", "call_agent")
+    graph.add_edge("call_agent", "save_output")
     graph.add_edge("save_output", END)
 
     return graph.compile()
