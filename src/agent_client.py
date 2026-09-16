@@ -25,14 +25,17 @@ from pydantic import BaseModel
 
 from src.config import AgentConfig, LLMConfig
 
-# Maps this project's llm.provider values to opencode provider IDs.
-# "ollama" is a custom provider we register in opencode.json; "google" and
-# "openrouter" are opencode's built-in provider IDs (to be confirmed against
-# a live account during Phase 4 parity testing).
+# Maps this project's llm.provider values to opencode provider IDs (confirmed
+# against models.dev, opencode's own provider catalog). "ollama" is a custom
+# provider we register in opencode.json; "google", "openrouter", and
+# "anthropic" are opencode's built-in provider IDs - each needs credentials
+# set up on the opencode side (`opencode auth login`), not via this project's
+# config.
 _PROVIDER_MAP = {
     "ollama": "ollama",
     "gemini": "google",
     "openrouter": "openrouter",
+    "anthropic": "anthropic",
 }
 
 

@@ -9,7 +9,13 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 Mode = Literal["detect", "review"]
-Provider = Literal["ollama", "gemini", "openrouter"]
+Provider = Literal["ollama", "gemini", "openrouter", "anthropic"]
+
+# Providers that need a real, pay-per-token API key (as opposed to "ollama",
+# which talks to a local server). Note: this is deliberately a plain API key
+# via ANTHROPIC_API_KEY, not a Claude Pro/Max subscription login - Anthropic's
+# terms restrict subscription auth to Anthropic's own first-party clients.
+_PROVIDERS_REQUIRING_API_KEY = ("gemini", "openrouter", "anthropic")
 
 
 class LLMConfig(BaseModel):
@@ -22,7 +28,7 @@ class LLMConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_api_key_env(self) -> "LLMConfig":
-        if self.provider in ("gemini", "openrouter") and not self.api_key_env:
+        if self.provider in _PROVIDERS_REQUIRING_API_KEY and not self.api_key_env:
             raise ValueError(
                 f"llm.api_key_env is required for provider '{self.provider}'"
             )

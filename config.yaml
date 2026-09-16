@@ -7,13 +7,18 @@
 mode: detect
 
 llm:
-  # provider: one of "ollama", "gemini", "openrouter"
+  # provider: one of "ollama", "gemini", "openrouter", "anthropic"
   provider: ollama
   model: gpt-oss:20b-cloud
   temperature: 0.0
   max_tokens: 4096
-  # api_key: name of the environment variable holding the API key
-  # (required for "gemini" and "openrouter"; ignored for "ollama")
+  # api_key_env is required (non-null) for "gemini"/"openrouter"/"anthropic"
+  # as a config-completeness check, but it's not actually read by this
+  # pipeline: opencode itself owns credentials, resolved from its own auth
+  # store. Set them up once, on whatever machine runs `opencode serve`, via:
+  #   opencode auth login --provider anthropic   (or gemini / openrouter)
+  # which prompts for the API key and stores it in
+  # ~/.local/share/opencode/auth.json - not this file, and not this field.
   api_key_env: null
   # base_url: only used for "ollama" (defaults to http://localhost:11434) or to
   # override OpenRouter's default endpoint.
