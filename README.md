@@ -10,6 +10,22 @@ involved (not just the diff hunks) and either detects these dependencies
 itself, or reviews dependencies already reported by a static-analysis tool.
 Results can then be scored against that tool's own output.
 
+## Index
+
+- [Background](#background)
+- [Modes](#modes)
+- [How it works](#how-it-works)
+  - [Agent backends](#agent-backends)
+  - [Adding Ollama models](#adding-ollama-models)
+  - [Reading the real source, not just the diff](#reading-the-real-source-not-just-the-diff)
+- [Project structure](#project-structure)
+  - [Static-analysis input format (Mode 2)](#static-analysis-input-format-mode-2)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Comparing against static analysis](#comparing-against-static-analysis)
+- [Implementation notes](#implementation-notes)
+- [License](#license)
+
 ## Background
 
 Definitions are adapted from Jesus et al., *"Comparing static analyses for
