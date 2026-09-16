@@ -11,7 +11,9 @@ compare.py) is unaffected.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -56,9 +58,19 @@ class OpencodeServer:
             return False
 
     def _start(self, timeout: float) -> None:
+        # subprocess.Popen (unlike a shell) won't resolve npm's Windows shim
+        # (opencode.cmd) from a bare "opencode" - shutil.which does the same
+        # PATH + PATHEXT search a shell would, on every platform.
+        executable = shutil.which("opencode")
+        if executable is None:
+            raise RuntimeError(
+                "opencode.auto_start is true but no 'opencode' executable was "
+                "found on PATH. Install it (see opencode.ai/docs) or start "
+                "`opencode serve` yourself and set agent.auto_start: false."
+            )
         port = self.base_url.rsplit(":", 1)[-1]
         self._proc = subprocess.Popen(
-            ["opencode", "serve", "--port", port],
+            [executable, "serve", "--port", port],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -71,7 +83,19 @@ class OpencodeServer:
 
     def close(self) -> None:
         # Only ever set when we spawned the process ourselves.
-        if self._proc is not None:
+        if self._proc is None:
+            return
+        if sys.platform == "win32":
+            # The resolved executable is a .CMD shim, which Popen launches
+            # via a cmd.exe wrapper; terminate() only kills that wrapper; the
+            # actual opencode.exe it spawns survives as an orphan unless we
+            # kill the whole process tree.
+            subprocess.run(
+                ["taskkill", "/PID", str(self._proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
             self._proc.terminate()
 
 
