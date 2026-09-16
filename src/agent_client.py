@@ -117,7 +117,10 @@ def run_agent(
     """
     server = OpencodeServer(agent_config)
     try:
-        directory = str(source_root) if source_root is not None else None
+        # Always pass an explicit directory rather than leaving opencode to
+        # pick its own default, so runs stay reproducible regardless of
+        # whatever project the opencode server last had open.
+        directory = str(source_root) if source_root is not None else str(Path.cwd())
         session = _post_json(
             _with_query(f"{server.base_url}/session", directory=directory),
             {},
@@ -134,6 +137,11 @@ def run_agent(
             "format": {
                 "type": "json_schema",
                 "schema": result_model.model_json_schema(),
+                # Have opencode retry the StructuredOutput tool call if the
+                # model's first attempt doesn't validate against the schema,
+                # rather than accepting a partial/invalid result outright
+                # (observed live with a weaker local model).
+                "retryCount": 3,
             },
         }
         response = _post_json(
