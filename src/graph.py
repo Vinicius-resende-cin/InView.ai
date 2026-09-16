@@ -6,7 +6,8 @@ from typing import Any, Optional, TypedDict
 
 from pydantic import BaseModel
 
-from src.agent_client import run_agent
+from src.agent_client import run_agent as run_opencode_agent
+from src.claude_code_client import run_agent as run_claude_code_agent
 from src.config import AppConfig
 from src.output import write_output
 from src.parsing.annotate import AnnotatedFile, annotate_diff_files
@@ -65,8 +66,9 @@ def call_agent(state: GraphState) -> dict:
     config = state["config"]
     system_text, human_text = state["messages"]
     result_model = _result_model_for_mode(config.mode)
+    run = run_claude_code_agent if config.agent.backend == "claude_code" else run_opencode_agent
 
-    return run_agent(
+    return run(
         agent_config=config.agent,
         llm_config=config.llm,
         agent_name=_agent_name_for_mode(config.mode),

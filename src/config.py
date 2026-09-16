@@ -50,23 +50,40 @@ class OutputConfig(BaseModel):
     path: Path
 
 
-class AgentConfig(BaseModel):
-    """Connection settings for the opencode server that runs the review agents."""
+Backend = Literal["opencode", "claude_code"]
 
+
+class AgentConfig(BaseModel):
+    """Settings for the agent backend that runs the review agents.
+
+    backend "opencode": talks to an opencode server (any llm.provider).
+    backend "claude_code": shells out to the `claude` CLI headlessly - the
+    only integration path allowed to use a Claude Pro/Max subscription login
+    rather than a pay-per-token API key, since it's Anthropic's own
+    first-party client (unlike opencode, and unlike claude-agent-sdk, whose
+    terms explicitly restrict it to API-key auth). llm.provider is ignored
+    in this mode; llm.model is passed through as `--model` if set.
+    """
+
+    backend: Backend = "opencode"
+
+    # -- opencode backend only --
     base_url: str = "http://localhost:4096"
     # If no server is reachable at base_url, spawn `opencode serve` ourselves.
     auto_start: bool = True
     startup_timeout: float = 30.0
-    request_timeout: float = 600.0
-    # Client-side: how many extra attempts to make (each a fresh session) if
-    # an attempt doesn't come back with schema-valid structured output.
-    # Models vary a lot in how reliably they end their turn with a valid
-    # tool call rather than free-form text; this is the knob for that.
-    max_retries: int = 2
     # Passed through as opencode's own format.retryCount: how many times
     # opencode itself retries the StructuredOutput tool call, within a
     # single attempt, when its arguments don't validate against the schema.
     format_retry_count: int = 3
+
+    # -- shared by both backends --
+    request_timeout: float = 600.0
+    # Client-side: how many extra attempts to make (each a fresh session/
+    # process) if an attempt doesn't come back with schema-valid structured
+    # output. Models vary a lot in how reliably they end their turn with a
+    # valid tool call rather than free-form text; this is the knob for that.
+    max_retries: int = 2
 
 
 class DependencyTypeConfig(BaseModel):
