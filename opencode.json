@@ -1,0 +1,54 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["superpowers@git+https://github.com/obra/superpowers.git"],
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "gemma4:31b-cloud": {
+          "name": "Gemma 4 31B (cloud)"
+        }
+      }
+    }
+  },
+  "agent": {
+    "dependency-detector": {
+      "description": "Mode 1: finds semantic dependencies between Left's and Right's changes in a merge scenario, reading the full source files (not just the diff) to verify each finding.",
+      "mode": "subagent",
+      "model": "ollama/gemma4:31b-cloud",
+      "temperature": 0,
+      "permission": {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "webfetch": "deny",
+        "websearch": "deny"
+      }
+    },
+    "dependency-reviewer": {
+      "description": "Mode 2: reviews semantic dependencies already found by static analysis, reading the full source files to assess whether each one is a genuine risk or safe/benign.",
+      "mode": "subagent",
+      "model": "ollama/gemma4:31b-cloud",
+      "temperature": 0,
+      "permission": {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "webfetch": "deny",
+        "websearch": "deny"
+      }
+    }
+  }
+}
