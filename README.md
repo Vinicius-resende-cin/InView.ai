@@ -16,11 +16,11 @@ Results can then be scored against that tool's own output.
 - [Modes](#modes)
 - [How it works](#how-it-works)
   - [Agent backends](#agent-backends)
-  - [Adding Ollama models](#adding-ollama-models)
   - [Reading the real source, not just the diff](#reading-the-real-source-not-just-the-diff)
 - [Project structure](#project-structure)
   - [Static-analysis input format (Mode 2)](#static-analysis-input-format-mode-2)
 - [Installation](#installation)
+  - [Adding Ollama models](#adding-ollama-models)
 - [Usage](#usage)
   - [Comparing against static analysis](#comparing-against-static-analysis)
 - [Implementation notes](#implementation-notes)
@@ -102,32 +102,6 @@ Both backends retry (a fresh attempt each time, up to `agent.max_retries`
 extra attempts) if a run doesn't come back with schema-valid structured
 output — models vary a lot in how reliably they end their turn with an
 actual structured result instead of free-form text.
-
-### Adding Ollama models
-
-The `opencode` backend's Ollama models aren't auto-discovered; each one
-needs an entry in `opencode.json` under `provider.ollama.models`:
-
-```json
-"provider": {
-  "ollama": {
-    "models": {
-      "qwen2.5-coder:14b": { "name": "Qwen2.5 Coder 14B" }
-    }
-  }
-}
-```
-
-The key is the exact model tag Ollama uses (`ollama list` to check), the
-`name` is just a display label. Then:
-
-1. Make sure Ollama actually has that model: `ollama pull <tag>` (this is
-   also required for Ollama-cloud-proxied tags, e.g. `*-cloud` suffixed
-   models — pulling registers the alias even though no weights are
-   downloaded locally).
-2. Re-sync opencode's global config: `python scripts/install_opencode_config.py`,
-   then restart any running `opencode serve`.
-3. Point `config.yaml`'s `llm.model` at the new tag.
 
 ### Reading the real source, not just the diff
 
@@ -217,6 +191,32 @@ numbers correspond to the merged version.
    - Install [Claude Code](https://claude.com/code).
    - Log in once: interactively (`claude`), or on a headless machine,
      `claude setup-token` (requires a Claude subscription).
+
+### Adding Ollama models
+
+The `opencode` backend's Ollama models aren't auto-discovered; each one
+needs an entry in `opencode.json` under `provider.ollama.models`:
+
+```json
+"provider": {
+  "ollama": {
+    "models": {
+      "qwen2.5-coder:14b": { "name": "Qwen2.5 Coder 14B" }
+    }
+  }
+}
+```
+
+The key is the exact model tag Ollama uses (`ollama list` to check), the
+`name` is just a display label. Then:
+
+1. Make sure Ollama actually has that model: `ollama pull <tag>` (this is
+   also required for Ollama-cloud-proxied tags, e.g. `*-cloud` suffixed
+   models — pulling registers the alias even though no weights are
+   downloaded locally).
+2. Re-sync opencode's global config: `python scripts/install_opencode_config.py`,
+   then restart any running `opencode serve`.
+3. Point `config.yaml`'s `llm.model` at the new tag.
 
 ## Usage
 
