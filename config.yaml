@@ -25,9 +25,11 @@ agent:
   # -- opencode backend only --
   # base_url: http://localhost:4096
   # auto_start: true
+  # startup_timeout: 30.0
   # format_retry_count: 3
 
   # -- shared by both backends --
+  # request_timeout: 600.0
   # max_retries: 2
 
 output:
