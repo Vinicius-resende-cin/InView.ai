@@ -9,7 +9,7 @@ mode: detect
 llm:
   # provider: one of "ollama", "gemini", "openrouter"
   provider: ollama
-  model: gemma4:31b-cloud
+  model: gpt-oss:20b-cloud
   temperature: 0.0
   max_tokens: 4096
   # api_key: name of the environment variable holding the API key
@@ -29,7 +29,7 @@ input:
   # it can open the full source files the diff only shows hunks of (e.g.
   # /path/to/checked-out/repo). Leave unset to fall back to reasoning from
   # the annotated diff text alone, as before.
-  # source_root: /path/to/checked-out/repo
+  # source_root: D:\Arquivos\Documentos\IC\repos\InView-Example
 
 agent:
   # Connection to the opencode server running the review agents (see

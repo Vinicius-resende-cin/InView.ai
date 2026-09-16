@@ -11,6 +11,9 @@
       "models": {
         "gemma4:31b-cloud": {
           "name": "Gemma 4 31B (cloud)"
+        },
+        "gpt-oss:20b-cloud": {
+          "name": "GPT-OSS 20B (cloud)"
         }
       }
     }

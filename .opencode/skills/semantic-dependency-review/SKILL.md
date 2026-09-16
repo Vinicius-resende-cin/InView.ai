@@ -28,6 +28,14 @@ the visible hunk. Before reporting or evaluating any dependency:
    itself uses for that side (Left/Right/merged) - don't renumber based on a
    file you opened that may be a different revision.
 
-Your final answer must still be ONLY the structured result requested in the
-task instructions (the JSON schema is enforced by the caller) - use these
-steps to verify your findings, not to add narration to the output.
+Your final action in this conversation MUST be a call to the `StructuredOutput`
+tool, with your findings as its argument, matching the schema you were given.
+This is not optional and it is not the same as writing the JSON as plain text
+in your response - a plain-text JSON blob is not captured by the caller and
+counts as a failed run. Do not end your turn, and do not just print the JSON,
+until you have actually invoked `StructuredOutput`. If you find zero
+dependencies, still call `StructuredOutput` with an empty list - do not skip
+the call just because the result is empty.
+
+Use the steps above to verify your findings before that call, not to add
+narration to the output.
