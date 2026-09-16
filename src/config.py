@@ -52,6 +52,15 @@ class AgentConfig(BaseModel):
     auto_start: bool = True
     startup_timeout: float = 30.0
     request_timeout: float = 600.0
+    # Client-side: how many extra attempts to make (each a fresh session) if
+    # an attempt doesn't come back with schema-valid structured output.
+    # Models vary a lot in how reliably they end their turn with a valid
+    # tool call rather than free-form text; this is the knob for that.
+    max_retries: int = 2
+    # Passed through as opencode's own format.retryCount: how many times
+    # opencode itself retries the StructuredOutput tool call, within a
+    # single attempt, when its arguments don't validate against the schema.
+    format_retry_count: int = 3
 
 
 class DependencyTypeConfig(BaseModel):

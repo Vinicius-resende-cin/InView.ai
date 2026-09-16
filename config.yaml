@@ -37,6 +37,16 @@ agent:
   # itself if base_url isn't already reachable.
   # base_url: http://localhost:4096
   # auto_start: true
+  #
+  # Models vary in how reliably they end their turn with a valid structured-
+  # output tool call rather than free-form text; these two retry knobs cover
+  # the two places that can go wrong.
+  # max_retries: how many extra full attempts (each a fresh session) if an
+  # attempt doesn't come back with schema-valid structured output at all.
+  # max_retries: 2
+  # format_retry_count: opencode's own retries of the structured-output tool
+  # call, within a single attempt, when its arguments don't validate.
+  # format_retry_count: 3
 
 output:
   path: results/output.json
