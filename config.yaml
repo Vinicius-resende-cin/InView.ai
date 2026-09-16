@@ -46,7 +46,7 @@ agent:
   # and llm.model (if set) is passed through as `claude`'s --model flag.
   # One-time setup for claude_code on a machine that isn't already logged
   # in interactively: `claude setup-token` (requires a Claude subscription).
-  # backend: opencode
+  backend: claude_code
   #
   # Connection to the opencode server running the review agents (see
   # opencode.json). Defaults shown; auto_start spawns `opencode serve`

@@ -1,11 +1,8 @@
 """Bridge to a running (or auto-started) opencode server.
 
-Replaces the old direct LangChain call: sends the same system/human prompt
-text to an opencode subagent over its HTTP API, with the result model's JSON
-schema enforced via opencode's built-in structured-output support, and
-returns the same {"structured_result", "raw_response", "parse_error"} shape
-the old call_llm() node produced, so downstream code (save_output,
-compare.py) is unaffected.
+Sends the system/human prompt text to an opencode subagent over its HTTP
+API, with the result model's JSON schema enforced via opencode's built-in
+structured-output support.
 """
 
 from __future__ import annotations
@@ -23,6 +20,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from src.clients.base import AgentClient
 from src.config import AgentConfig, LLMConfig
 
 # Maps this project's llm.provider values to opencode provider IDs (confirmed
@@ -39,7 +37,7 @@ _PROVIDER_MAP = {
 }
 
 
-class OpencodeServer:
+class _OpencodeServer:
     """Connects to agent_config.base_url, starting `opencode serve` if needed."""
 
     def __init__(self, agent_config: AgentConfig):
@@ -127,115 +125,93 @@ def _raw_text(response: dict) -> Optional[str]:
     return text or None
 
 
-def run_agent(
-    agent_config: AgentConfig,
-    llm_config: LLMConfig,
-    agent_name: str,
-    system_text: str,
-    human_text: str,
-    result_model: type[BaseModel],
-    source_root: Optional[Path] = None,
-) -> dict:
-    """Run `agent_name` and return the pipeline's result dict, retrying (each
-    attempt a fresh session) up to `agent_config.max_retries` extra times if
-    an attempt doesn't come back with schema-valid structured output - models
-    vary in how reliably they end their turn with a valid tool call rather
-    than free-form text, and a fresh attempt often succeeds where a prior one
-    didn't.
+class OpencodeAgentClient(AgentClient):
+    """Runs reviews through an opencode subagent (dependency-detector /
+    dependency-reviewer), any llm.provider opencode itself is configured for.
     """
-    server = OpencodeServer(agent_config)
-    try:
-        attempts = max(1, agent_config.max_retries + 1)
-        result: dict = {}
-        for _ in range(attempts):
-            result = _run_agent_once(
-                server, agent_config, llm_config, agent_name, system_text,
-                human_text, result_model, source_root,
-            )
-            if result["parse_error"] is None:
-                return result
 
-        result["parse_error"] = f"{result['parse_error']} (after {attempts} attempt(s))"
-        return result
-    finally:
-        server.close()
+    def _setup(self) -> None:
+        self._server = _OpencodeServer(self.agent_config)
 
+    def _teardown(self) -> None:
+        self._server.close()
 
-def _run_agent_once(
-    server: "OpencodeServer",
-    agent_config: AgentConfig,
-    llm_config: LLMConfig,
-    agent_name: str,
-    system_text: str,
-    human_text: str,
-    result_model: type[BaseModel],
-    source_root: Optional[Path],
-) -> dict:
-    """Send one message to `agent_name` (a fresh session) and return the
-    pipeline's result dict.
+    def _run_once(
+        self,
+        llm_config: LLMConfig,
+        agent_name: str,
+        system_text: str,
+        human_text: str,
+        result_model: type[BaseModel],
+        source_root: Optional[Path],
+    ) -> dict:
+        """Send one message to `agent_name` (a fresh session) and return the
+        pipeline's result dict.
 
-    When `source_root` is given, the session's read/grep/glob tools are
-    scoped to that directory, so the agent can open the full source files
-    the diff only shows hunks of instead of working from the diff text alone.
-    """
-    # Always pass an explicit directory rather than leaving opencode to pick
-    # its own default, so runs stay reproducible regardless of whatever
-    # project the opencode server last had open.
-    directory = str(source_root) if source_root is not None else str(Path.cwd())
-    session = _post_json(
-        _with_query(f"{server.base_url}/session", directory=directory),
-        {},
-        agent_config.request_timeout,
-    )
-    session_id = session["id"]
+        When `source_root` is given, the session's read/grep/glob tools are
+        scoped to that directory, so the agent can open the full source
+        files the diff only shows hunks of instead of working from the diff
+        text alone.
+        """
+        server = self._server
+        # Always pass an explicit directory rather than leaving opencode to
+        # pick its own default, so runs stay reproducible regardless of
+        # whatever project the opencode server last had open.
+        directory = str(source_root) if source_root is not None else str(Path.cwd())
+        session = _post_json(
+            _with_query(f"{server.base_url}/session", directory=directory),
+            {},
+            self.agent_config.request_timeout,
+        )
+        session_id = session["id"]
 
-    provider_id = _PROVIDER_MAP.get(llm_config.provider, llm_config.provider)
-    body = {
-        "agent": agent_name,
-        "model": {"providerID": provider_id, "modelID": llm_config.model},
-        "system": system_text,
-        "parts": [{"type": "text", "text": human_text}],
-        "format": {
-            "type": "json_schema",
-            "schema": result_model.model_json_schema(),
-            # Have opencode retry the StructuredOutput tool call if the
-            # model's first attempt doesn't validate against the schema,
-            # rather than accepting a partial/invalid result outright
-            # (observed live with a weaker local model).
-            "retryCount": agent_config.format_retry_count,
-        },
-    }
-    response = _post_json(
-        _with_query(f"{server.base_url}/session/{session_id}/message", directory=directory),
-        body,
-        agent_config.request_timeout,
-    )
-
-    info = response.get("info", {})
-    structured = info.get("structured")
-    raw_response = _raw_text(response)
-
-    if structured is None:
-        return {
-            "structured_result": None,
-            "raw_response": raw_response,
-            "parse_error": (
-                "opencode agent returned no structured output "
-                f"(finish={info.get('finish')!r})"
-            ),
+        provider_id = _PROVIDER_MAP.get(llm_config.provider, llm_config.provider)
+        body = {
+            "agent": agent_name,
+            "model": {"providerID": provider_id, "modelID": llm_config.model},
+            "system": system_text,
+            "parts": [{"type": "text", "text": human_text}],
+            "format": {
+                "type": "json_schema",
+                "schema": result_model.model_json_schema(),
+                # Have opencode retry the StructuredOutput tool call if the
+                # model's first attempt doesn't validate against the schema,
+                # rather than accepting a partial/invalid result outright
+                # (observed live with a weaker local model).
+                "retryCount": self.agent_config.format_retry_count,
+            },
         }
+        response = _post_json(
+            _with_query(f"{server.base_url}/session/{session_id}/message", directory=directory),
+            body,
+            self.agent_config.request_timeout,
+        )
 
-    try:
-        parsed = result_model.model_validate(structured)
-    except Exception as exc:
+        info = response.get("info", {})
+        structured = info.get("structured")
+        raw_response = _raw_text(response)
+
+        if structured is None:
+            return {
+                "structured_result": None,
+                "raw_response": raw_response,
+                "parse_error": (
+                    "opencode agent returned no structured output "
+                    f"(finish={info.get('finish')!r})"
+                ),
+            }
+
+        try:
+            parsed = result_model.model_validate(structured)
+        except Exception as exc:
+            return {
+                "structured_result": None,
+                "raw_response": raw_response,
+                "parse_error": f"structured output failed schema validation: {exc}",
+            }
+
         return {
-            "structured_result": None,
+            "structured_result": parsed.model_dump(),
             "raw_response": raw_response,
-            "parse_error": f"structured output failed schema validation: {exc}",
+            "parse_error": None,
         }
-
-    return {
-        "structured_result": parsed.model_dump(),
-        "raw_response": raw_response,
-        "parse_error": None,
-    }
