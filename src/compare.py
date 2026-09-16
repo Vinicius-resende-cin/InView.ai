@@ -29,14 +29,17 @@ DEPENDENCY_TYPES = ["Direct Flow", "Overriding Assignment", "Confluence Flow"]
 
 
 def _line_set(refs: Iterable[LineRef]) -> set[LineKey]:
+    """Convert LineRefs to a set of (class, line) keys."""
     return {(ref.class_name, ref.line) for ref in refs}
 
 
 def _llm_line_set(dep: DetectedDependency) -> set[LineKey]:
+    """All locations (both sides) involved in an LLM-detected dependency."""
     return _line_set(dep.left_lines) | _line_set(dep.right_lines)
 
 
 def _tool_line_set(dep: PrecomputedDependency) -> set[LineKey]:
+    """All locations across every node's path in a tool-found dependency."""
     lines: set[LineKey] = set()
     for node in dep.nodes:
         for step in node.path:
@@ -70,6 +73,7 @@ def _greedy_match(
 
 
 def load_llm_result(path: str | Path) -> Mode1Result:
+    """Load and validate a Mode 1 pipeline output file."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(
@@ -93,6 +97,8 @@ def load_llm_result(path: str | Path) -> Mode1Result:
 
 
 def compare(llm_result: Mode1Result, tool_deps: DependencySet) -> list[dict]:
+    """Match LLM-detected against tool-found dependencies per type and
+    return one summary row per type plus a totals row."""
     rows: list[dict] = []
     total_llm = total_tool = total_added_llm = total_added_tool = 0
 
@@ -138,6 +144,7 @@ def compare(llm_result: Mode1Result, tool_deps: DependencySet) -> list[dict]:
 
 
 def write_csv(rows: list[dict], path: str | Path) -> None:
+    """Write the comparison rows to a CSV file."""
     fieldnames = ["type", "detected_by_llm", "found_by_tool", "added_llm", "added_tool"]
     header_labels = {
         "detected_by_llm": "Detected (LLM)",
@@ -153,6 +160,7 @@ def write_csv(rows: list[dict], path: str | Path) -> None:
 
 
 def print_table(rows: list[dict]) -> None:
+    """Print the comparison rows as an aligned text table."""
     header = (
         f"{'Type':<24}{'Detected (LLM)':>16}{'Found (tool)':>14}"
         f"{'Added (LLM)':>14}{'Added (tool)':>14}"
@@ -167,6 +175,7 @@ def print_table(rows: list[dict]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: `python -m src.compare --llm-output <path>`."""
     parser = argparse.ArgumentParser(
         description="Compare Mode 1 ('detect') LLM output against the "
         "static-analysis tool's dependencies and export a summary table."

@@ -6,17 +6,20 @@ from src.parsing.dependency_parser import DependencySet, InterferenceNode, PathS
 
 
 def _render_path_step(step: PathStep) -> str:
+    """Render one path step as "class:line [author] (method)"."""
     tag = f" [{step.author}]" if step.author else ""
     return f"{step.class_name}:{step.line}{tag} ({step.method})"
 
 
 def _render_node(node: InterferenceNode) -> str:
+    """Render one interference node with its full path."""
     branch_tag = f" (reported branch: {node.branch})" if node.branch else ""
     path_str = " -> ".join(_render_path_step(step) for step in node.path)
     return f"   - {node.role}{branch_tag}: {node.text}\n     path: {path_str}"
 
 
 def render_dependencies(dependencies: DependencySet) -> str:
+    """Render the static-analysis tool's precomputed dependencies for the prompt."""
     if not dependencies.dependencies:
         return "No semantic dependencies were reported by static analysis."
 

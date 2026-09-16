@@ -8,6 +8,8 @@ from typing import Any
 
 
 def write_output(path: str | Path, state: dict[str, Any]) -> None:
+    """Write the pipeline's final state as JSON to `path`, creating any
+    missing parent directories."""
     config = state["config"]
     payload = {
         "mode": config.mode,

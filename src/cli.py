@@ -10,6 +10,11 @@ from src.graph import run_pipeline
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Load the config, run the pipeline, and report the result.
+
+    Returns 1 (and prints a warning to stderr) if the run ended with a
+    parse_error, 0 otherwise.
+    """
     parser = argparse.ArgumentParser(
         description="Run an LLM code review (Mode 1: detect, Mode 2: review) "
         "on a merge scenario diff, as configured in a YAML config file."

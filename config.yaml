@@ -1,86 +1,43 @@
-# Configuration for the semantic-dependency code-review experiment.
-#
-# mode:
-#   detect  -> Mode 1: ask the LLM to find semantic dependencies itself.
-#   review  -> Mode 2: give the LLM the dependencies already found by static
-#              analysis (see input.dependencies_file) and ask it to review the merge.
-mode: detect
+# Pipeline configuration. See README.md for the full explanation of every
+# section below.
+
+mode: detect  # detect (Mode 1) or review (Mode 2)
 
 llm:
-  # provider: one of "ollama", "gemini", "openrouter", "anthropic"
-  provider: anthropic
-  # model: passed through as `claude`'s --model flag when agent.backend is
-  # claude_code (ignored otherwise); "sonnet"/"opus" aliases always resolve
-  # to the latest of that family, more robust than a dated full model name.
+  provider: anthropic  # ollama | gemini | openrouter | anthropic
   model: sonnet
   temperature: 0.0
   max_tokens: 4096
-  # api_key_env is required (non-null) for "gemini"/"openrouter"/"anthropic"
-  # as a config-completeness check, but it's not actually read by this
-  # pipeline: opencode itself owns credentials, resolved from its own auth
-  # store. Set them up once, on whatever machine runs `opencode serve`, via:
-  #   opencode auth login --provider anthropic   (or gemini / openrouter)
-  # which prompts for the API key and stores it in
-  # ~/.local/share/opencode/auth.json - not this file, and not this field.
+  # Required for gemini/openrouter/anthropic as a config-completeness check;
+  # not read directly - see README's "Agent backends" for real credential setup.
   api_key_env: anthropic
-  # base_url: only used for "ollama" (defaults to http://localhost:11434) or to
-  # override OpenRouter's default endpoint.
-  base_url: null
+  base_url: null  # ollama/openrouter only
 
 input:
   diff_file: samples/diff.txt
   modified_lines_file: samples/modified-lines.txt
-  # only required when mode: review
-  dependencies_file: samples/dependencies.sample.json
-  # optional: checkout of the merged codebase the diff applies to. When set,
-  # the review agent's read/grep/glob tools are scoped to this directory so
-  # it can open the full source files the diff only shows hunks of (e.g.
-  # /path/to/checked-out/repo). Leave unset to fall back to reasoning from
-  # the annotated diff text alone, as before.
-  source_root: D:\Arquivos\Documentos\IC\repos\InView-Example
+  dependencies_file: samples/dependencies.sample.json  # required when mode: review
+  source_root: D:\Arquivos\Documentos\IC\repos\InView-Example  # optional; see README
 
 agent:
-  # backend: "opencode" (default) talks to an opencode server - any
-  # llm.provider (ollama/gemini/openrouter/anthropic), all via API keys.
-  # "claude_code" shells out to the `claude` CLI headlessly instead - the
-  # only integration path allowed to use a Claude Pro/Max subscription login
-  # rather than a pay-per-token key (claude-agent-sdk's own terms restrict
-  # it to API keys, same as opencode). In this mode llm.provider is ignored
-  # and llm.model (if set) is passed through as `claude`'s --model flag.
-  # One-time setup for claude_code on a machine that isn't already logged
-  # in interactively: `claude setup-token` (requires a Claude subscription).
-  backend: claude_code
-  #
-  # Connection to the opencode server running the review agents (see
-  # opencode.json). Defaults shown; auto_start spawns `opencode serve`
-  # itself if base_url isn't already reachable. Ignored for claude_code.
+  backend: claude_code  # opencode | claude_code
+
+  # -- opencode backend only --
   # base_url: http://localhost:4096
   # auto_start: true
-  #
-  # Models vary in how reliably they end their turn with a valid structured-
-  # output result rather than free-form text; these two retry knobs cover
-  # the two places that can go wrong.
-  # max_retries: how many extra full attempts (each a fresh session/process)
-  # if an attempt doesn't come back with schema-valid structured output at
-  # all. Applies to both backends.
-  # max_retries: 2
-  # format_retry_count: opencode's own retries of the structured-output tool
-  # call, within a single attempt, when its arguments don't validate.
-  # opencode backend only - claude_code has no equivalent knob.
   # format_retry_count: 3
+
+  # -- shared by both backends --
+  # max_retries: 2
 
 output:
   path: results/output.json
 
-# Semantic dependency types the pipeline knows about. Definitions are adapted
-# from Jesus et al., "Comparing static analyses for improved semantic conflict
-# detection" (Automated Software Engineering, 2026), restricted to the three
-# analyses this project targets: Direct Flow, Overriding Assignment, and
-# Confluence Flow.
-#
-# `detect: true` means the type is included in Mode 1's "which dependencies to
-# look for" instructions. All three are always included in the shared
-# definitions block given to the LLM in both modes.
+# Semantic dependency types the pipeline knows about, adapted from Jesus et
+# al., "Comparing static analyses for improved semantic conflict detection"
+# (Automated Software Engineering, 2026). `detect: true` includes the type in
+# Mode 1's "look for" instructions; all three are always included in the
+# shared definitions block given to the LLM in both modes.
 dependency_types:
   - name: Direct Flow
     detect: true

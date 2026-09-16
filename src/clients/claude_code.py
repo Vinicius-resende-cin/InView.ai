@@ -42,6 +42,7 @@ class ClaudeCodeAgentClient(AgentClient):
         result_model: type[BaseModel],
         source_root: Optional[Path],
     ) -> dict:
+        """Run `claude -p` once and return the pipeline's result dict."""
         del agent_name
         executable = shutil.which("claude")
         if executable is None:
@@ -52,25 +53,17 @@ class ClaudeCodeAgentClient(AgentClient):
                 "headless machine (requires a Claude subscription)."
             )
 
-        # The resolved executable is npm's claude.CMD shim, which Windows can
-        # only launch via cmd.exe /c - capped at ~8191 characters per command
-        # line, regardless of subprocess's own (much higher) limit. The
-        # prompt (the annotated diff) easily blows past that inline, so it
-        # goes over stdin instead; the system prompt goes through a temp
-        # file via --system-prompt-file, a documented but unlisted sibling
-        # of --system-prompt (see --bare's help text). Only the schema stays
-        # inline - schemas here are small enough not to matter.
+        # Prompt goes over stdin and the system prompt through a temp file,
+        # not inline args - see README's Implementation notes (Windows
+        # command-line length limit).
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False, encoding="utf-8"
         ) as f:
             f.write(system_text)
             system_prompt_path = f.name
 
-        # Run from this project's own directory (not source_root) so Claude
-        # Code auto-discovers .claude/skills/ here; --add-dir grants read
-        # access into source_root as well, without changing where skills/
-        # settings resolve from - unlike opencode, no separate global-config
-        # sync is needed.
+        # cwd stays this project's directory so .claude/skills/ auto-discovers;
+        # --add-dir grants read access into source_root as well.
         cmd = [
             executable,
             "-p",

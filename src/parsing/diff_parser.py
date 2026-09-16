@@ -15,18 +15,23 @@ _JAVA_SRC_RE = re.compile(r"(?:^|/)(?:src/(?:main|test)/java|java)/(?P<rest>.+)\
 
 
 class DiffLine(BaseModel):
+    """One added, removed, or context line from a diff hunk."""
+
     line_no: int
     content: str
     change_type: ChangeType
 
 
 class DiffFile(BaseModel):
+    """One file's changes in a diff, with its inferred Java class name."""
+
     path: str
     class_name: Optional[str] = None
     lines: list[DiffLine]
 
 
 def _strip_prefix(path: str) -> str:
+    """Strip git's a/ or b/ prefix from a diff file path."""
     if path.startswith(("a/", "b/")):
         return path[2:]
     return path
@@ -41,6 +46,7 @@ def infer_class_name(file_path: str) -> Optional[str]:
 
 
 def parse_diff(text: str) -> list[DiffFile]:
+    """Parse unified diff text into one DiffFile per changed file."""
     patch_set = PatchSet(text)
     files: list[DiffFile] = []
 
@@ -87,4 +93,5 @@ def parse_diff(text: str) -> list[DiffFile]:
 
 
 def load_diff(path: str | Path) -> list[DiffFile]:
+    """Read and parse a unified diff file."""
     return parse_diff(Path(path).read_text(encoding="utf-8"))

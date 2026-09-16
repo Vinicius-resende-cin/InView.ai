@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-from src.parsing.diff_parser import DiffFile, load_diff, parse_diff
-from src.parsing.modified_lines_parser import (
-    ClassAuthorship,
-    load_modified_lines,
-    parse_modified_lines,
-)
+from src.parsing.diff_parser import DiffFile
+from src.parsing.modified_lines_parser import ClassAuthorship
 
 Author = Literal["Left", "Right"]
 
 
 class AnnotatedLine(BaseModel):
+    """A diff line tagged with which developer (if any) introduced it."""
+
     line_no: int
     content: str
     change_type: Literal["added", "removed", "context"]
@@ -25,6 +22,8 @@ class AnnotatedLine(BaseModel):
 
 
 class AnnotatedFile(BaseModel):
+    """One file's diff, with every changed line tagged by author."""
+
     path: str
     class_name: Optional[str] = None
     lines: list[AnnotatedLine]
@@ -33,6 +32,7 @@ class AnnotatedFile(BaseModel):
 def _author_for_line(
     authorship: Optional[ClassAuthorship], line_no: int, change_type: str
 ) -> Optional[Author]:
+    """Look up which developer authored `line_no`, if any."""
     if authorship is None:
         return None
     if change_type == "added":
@@ -51,6 +51,7 @@ def _author_for_line(
 def annotate_diff_files(
     diff_files: list[DiffFile], authorship_by_class: dict[str, ClassAuthorship]
 ) -> list[AnnotatedFile]:
+    """Tag each diff line with its author, using per-class authorship data."""
     annotated: list[AnnotatedFile] = []
 
     for diff_file in diff_files:
@@ -77,17 +78,3 @@ def annotate_diff_files(
         )
 
     return annotated
-
-
-def build_annotated_diff(diff_text: str, modified_lines_text: str) -> list[AnnotatedFile]:
-    diff_files = parse_diff(diff_text)
-    authorship_by_class = parse_modified_lines(modified_lines_text)
-    return annotate_diff_files(diff_files, authorship_by_class)
-
-
-def load_annotated_diff(
-    diff_path: str | Path, modified_lines_path: str | Path
-) -> list[AnnotatedFile]:
-    diff_files = load_diff(diff_path)
-    authorship_by_class = load_modified_lines(modified_lines_path)
-    return annotate_diff_files(diff_files, authorship_by_class)

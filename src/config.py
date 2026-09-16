@@ -11,14 +11,14 @@ from pydantic import BaseModel, Field, model_validator
 Mode = Literal["detect", "review"]
 Provider = Literal["ollama", "gemini", "openrouter", "anthropic"]
 
-# Providers that need a real, pay-per-token API key (as opposed to "ollama",
-# which talks to a local server). Note: this is deliberately a plain API key
-# via ANTHROPIC_API_KEY, not a Claude Pro/Max subscription login - Anthropic's
-# terms restrict subscription auth to Anthropic's own first-party clients.
+# Providers needing a pay-per-token API key, as opposed to "ollama" (local
+# server). See README's "Agent backends" section for how each is authenticated.
 _PROVIDERS_REQUIRING_API_KEY = ("gemini", "openrouter", "anthropic")
 
 
 class LLMConfig(BaseModel):
+    """Which model to use and, for API-key providers, how to authenticate."""
+
     provider: Provider
     model: str
     temperature: float = 0.0
@@ -36,17 +36,18 @@ class LLMConfig(BaseModel):
 
 
 class InputConfig(BaseModel):
+    """Paths to the merge scenario's diff, authorship, and (Mode 2) the
+    static-analysis tool's findings."""
+
     diff_file: Path
     modified_lines_file: Path
     dependencies_file: Optional[Path] = None
-    # Checkout of the merged codebase the diff applies to. When set, the
-    # review agent's read/grep/glob tools are scoped to this directory so it
-    # can open the full source files the diff only shows hunks of, instead
-    # of working from the annotated diff text alone.
     source_root: Optional[Path] = None
 
 
 class OutputConfig(BaseModel):
+    """Where to write the pipeline's result JSON."""
+
     path: Path
 
 
@@ -56,43 +57,35 @@ Backend = Literal["opencode", "claude_code"]
 class AgentConfig(BaseModel):
     """Settings for the agent backend that runs the review agents.
 
-    backend "opencode": talks to an opencode server (any llm.provider).
-    backend "claude_code": shells out to the `claude` CLI headlessly - the
-    only integration path allowed to use a Claude Pro/Max subscription login
-    rather than a pay-per-token API key, since it's Anthropic's own
-    first-party client (unlike opencode, and unlike claude-agent-sdk, whose
-    terms explicitly restrict it to API-key auth). llm.provider is ignored
-    in this mode; llm.model is passed through as `--model` if set.
+    See README's "Agent backends" section for what each backend is and why
+    both exist.
     """
 
     backend: Backend = "opencode"
 
     # -- opencode backend only --
     base_url: str = "http://localhost:4096"
-    # If no server is reachable at base_url, spawn `opencode serve` ourselves.
     auto_start: bool = True
     startup_timeout: float = 30.0
-    # Passed through as opencode's own format.retryCount: how many times
-    # opencode itself retries the StructuredOutput tool call, within a
-    # single attempt, when its arguments don't validate against the schema.
     format_retry_count: int = 3
 
     # -- shared by both backends --
     request_timeout: float = 600.0
-    # Client-side: how many extra attempts to make (each a fresh session/
-    # process) if an attempt doesn't come back with schema-valid structured
-    # output. Models vary a lot in how reliably they end their turn with a
-    # valid tool call rather than free-form text; this is the knob for that.
     max_retries: int = 2
 
 
 class DependencyTypeConfig(BaseModel):
+    """One semantic dependency type: its definition text for the prompt, and
+    whether Mode 1 should actively look for it."""
+
     name: str
     detect: bool = True
     definition: str
 
 
 class AppConfig(BaseModel):
+    """Root config schema, loaded from config.yaml."""
+
     mode: Mode
     llm: LLMConfig
     input: InputConfig

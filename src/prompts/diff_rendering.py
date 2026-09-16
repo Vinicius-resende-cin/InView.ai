@@ -8,6 +8,8 @@ _MARKER = {"added": "+", "removed": "-", "context": " "}
 
 
 def render_annotated_diff(files: list[AnnotatedFile]) -> str:
+    """Render annotated files as plain text, one [Left]/[Right]-tagged
+    block per file."""
     blocks: list[str] = []
 
     for file in files:

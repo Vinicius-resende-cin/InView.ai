@@ -19,6 +19,8 @@ from src.schemas import Mode1Result, Mode2Result
 
 
 class GraphState(TypedDict, total=False):
+    """State threaded through the pipeline's steps; see run_pipeline."""
+
     config: AppConfig
     annotated_diff: list[AnnotatedFile]
     dependencies: Optional[DependencySet]
@@ -29,14 +31,18 @@ class GraphState(TypedDict, total=False):
 
 
 def _result_model_for_mode(mode: str) -> type[BaseModel]:
+    """The structured-output schema expected for this mode."""
     return Mode1Result if mode == "detect" else Mode2Result
 
 
 def _agent_name_for_mode(mode: str) -> str:
+    """The opencode subagent name for this mode (ignored by claude_code)."""
     return "dependency-detector" if mode == "detect" else "dependency-reviewer"
 
 
 def load_inputs(state: GraphState) -> dict:
+    """Parse the diff, authorship, and (Mode 2) precomputed dependencies,
+    and join the diff with authorship into an annotated diff."""
     config = state["config"]
     authorship_by_class = load_modified_lines(config.input.modified_lines_file)
     diff_files = load_diff(config.input.diff_file)
@@ -51,6 +57,8 @@ def load_inputs(state: GraphState) -> dict:
 
 
 def build_prompt(state: GraphState) -> dict:
+    """Render the annotated diff (and, in Mode 2, the precomputed
+    dependencies) into a system/human prompt pair."""
     config = state["config"]
     if config.mode == "detect":
         messages = build_detect_messages(config.dependency_types, state["annotated_diff"])
@@ -62,6 +70,8 @@ def build_prompt(state: GraphState) -> dict:
 
 
 def call_agent(state: GraphState) -> dict:
+    """Send the prompt to the configured agent backend and return its
+    structured result."""
     config = state["config"]
     system_text, human_text = state["messages"]
     result_model = _result_model_for_mode(config.mode)
@@ -78,6 +88,7 @@ def call_agent(state: GraphState) -> dict:
 
 
 def save_output(state: GraphState) -> dict:
+    """Write the pipeline's result to output.path."""
     write_output(state["config"].output.path, state)
     return {}
 
@@ -86,6 +97,8 @@ _PIPELINE = (load_inputs, build_prompt, call_agent, save_output)
 
 
 def run_pipeline(config: AppConfig) -> dict[str, Any]:
+    """Run load_inputs -> build_prompt -> call_agent -> save_output in
+    order, threading state through each step."""
     state: GraphState = {"config": config}
     for step in _PIPELINE:
         state.update(step(state))

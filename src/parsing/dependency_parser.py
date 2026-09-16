@@ -1,41 +1,6 @@
-"""Loader for Mode 2's precomputed semantic-dependency data.
-
-The static-analysis tool emits a JSON array of raw findings, e.g.::
-
-    [
-      {
-        "type": "OAINTER",
-        "label": "OA conflict",
-        "body": {
-          "description": "...",
-          "interference": [
-            {
-              "type": "declaration",
-              "branch": "L",
-              "text": "...",
-              "location": {"file": "", "class": "org.example.Clue", "method": "<init>", "line": 22},
-              "stackTrace": [{"class": "...", "method": "...", "line": 9}, ...]
-            },
-            ...
-          ]
-        }
-      },
-      ...
-    ]
-
-Findings are classified into one of the three target dependency types by
-inspecting `type`/`label`:
-
-- contains "OA"  -> Overriding Assignment
-- contains "CF"  -> Confluence Flow
-- `type == "CONFLICT"` (Sparse Value-Flow / "SVFA conflict") -> Direct Flow
-
-Any finding that doesn't match one of these is dropped (out of scope).
-Exact-duplicate findings (the tool is known to repeat entries) are collapsed
-to one. Each interference node's `branch` field ("L"/"R") is often empty; in
-that case, authorship is resolved by matching each stack-trace frame's
-(class, line) against the modified-lines.txt data, since state-element line
-numbers here correspond to the merged version's line numbers.
+"""Loader for Mode 2's precomputed semantic-dependency data (the static-
+analysis tool's raw JSON findings). See README's static-analysis input
+format notes for the raw JSON shape and classification rules.
 """
 
 from __future__ import annotations
@@ -53,6 +18,8 @@ Author = Literal["Left", "Right"]
 
 
 class RawLocation(BaseModel):
+    """A (class, method, line) location as reported by the tool's raw JSON."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     class_name: str = Field(alias="class")
@@ -67,6 +34,8 @@ class RawLocation(BaseModel):
 
 
 class RawInterferenceNode(BaseModel):
+    """One raw interference entry from the tool's `body.interference` array."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     role: str = Field(alias="type")
@@ -77,6 +46,8 @@ class RawInterferenceNode(BaseModel):
 
 
 class PathStep(BaseModel):
+    """One location in an InterferenceNode's path, with resolved authorship."""
+
     class_name: str
     line: int
     method: str
@@ -84,6 +55,8 @@ class PathStep(BaseModel):
 
 
 class InterferenceNode(BaseModel):
+    """One node of a PrecomputedDependency, with authorship resolved."""
+
     role: str
     branch: str
     text: str
@@ -91,16 +64,23 @@ class InterferenceNode(BaseModel):
 
 
 class PrecomputedDependency(BaseModel):
+    """One dependency reported by the static-analysis tool, classified into
+    one of the three target types."""
+
     type: DependencyType
     description: str
     nodes: list[InterferenceNode]
 
 
 class DependencySet(BaseModel):
+    """All of the static-analysis tool's dependencies for one merge scenario."""
+
     dependencies: list[PrecomputedDependency]
 
 
 def classify_dependency_type(tool_type: str, label: str) -> Optional[DependencyType]:
+    """Map the tool's own `type`/`label` fields to one of the three target
+    dependency types, or None if the finding is out of scope."""
     tool_type_u = tool_type.upper()
     label_u = label.upper()
     if "OA" in tool_type_u or "OA" in label_u:
@@ -115,6 +95,7 @@ def classify_dependency_type(tool_type: str, label: str) -> Optional[DependencyT
 def _resolve_author(
     class_name: str, line: int, authorship_by_class: dict[str, ClassAuthorship]
 ) -> Optional[Author]:
+    """Resolve authorship for a (class, line) via the modified-lines.txt data."""
     authorship = authorship_by_class.get(class_name)
     if authorship is None:
         return None
@@ -124,6 +105,7 @@ def _resolve_author(
 def _build_path(
     node: RawInterferenceNode, authorship_by_class: dict[str, ClassAuthorship]
 ) -> list[PathStep]:
+    """Build a node's path with authorship resolved for each frame."""
     frames = node.stack_trace or [node.location]
     return [
         PathStep(
@@ -137,6 +119,7 @@ def _build_path(
 
 
 def _dedupe_raw_entries(entries: list[dict]) -> list[dict]:
+    """Collapse exact-duplicate raw findings (the tool is known to repeat entries)."""
     seen: set[str] = set()
     unique: list[dict] = []
     for entry in entries:
@@ -150,6 +133,8 @@ def _dedupe_raw_entries(entries: list[dict]) -> list[dict]:
 def parse_dependencies(
     text: str, authorship_by_class: dict[str, ClassAuthorship]
 ) -> DependencySet:
+    """Parse the static-analysis tool's raw JSON into a DependencySet,
+    classifying and deduplicating findings and resolving authorship."""
     raw_entries: list[dict] = json.loads(text)
     dependencies: list[PrecomputedDependency] = []
 
@@ -186,4 +171,5 @@ def parse_dependencies(
 def load_dependencies(
     path: str | Path, authorship_by_class: dict[str, ClassAuthorship]
 ) -> DependencySet:
+    """Read and parse the static-analysis tool's dependencies file."""
     return parse_dependencies(Path(path).read_text(encoding="utf-8"), authorship_by_class)

@@ -52,6 +52,7 @@ class _OpencodeServer:
             self._start(agent_config.startup_timeout)
 
     def _reachable(self) -> bool:
+        """Whether a server is already responding at base_url."""
         try:
             urllib.request.urlopen(f"{self.base_url}/doc", timeout=2)
             return True
@@ -59,9 +60,9 @@ class _OpencodeServer:
             return False
 
     def _start(self, timeout: float) -> None:
-        # subprocess.Popen (unlike a shell) won't resolve npm's Windows shim
-        # (opencode.cmd) from a bare "opencode" - shutil.which does the same
-        # PATH + PATHEXT search a shell would, on every platform.
+        """Spawn `opencode serve` and block until it responds."""
+        # shutil.which resolves npm's Windows .CMD shim; a bare "opencode"
+        # passed straight to Popen would not (see README's Implementation notes).
         executable = shutil.which("opencode")
         if executable is None:
             raise RuntimeError(
@@ -83,14 +84,12 @@ class _OpencodeServer:
         raise RuntimeError(f"opencode serve did not become ready within {timeout}s")
 
     def close(self) -> None:
-        # Only ever set when we spawned the process ourselves.
+        """Terminate the server if we spawned it ourselves; no-op otherwise."""
         if self._proc is None:
             return
         if sys.platform == "win32":
-            # The resolved executable is a .CMD shim, which Popen launches
-            # via a cmd.exe wrapper; terminate() only kills that wrapper; the
-            # actual opencode.exe it spawns survives as an orphan unless we
-            # kill the whole process tree.
+            # terminate() alone only kills the .CMD wrapper, not the actual
+            # opencode.exe child it spawns (see README's Implementation notes).
             subprocess.run(
                 ["taskkill", "/PID", str(self._proc.pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL,
@@ -101,6 +100,7 @@ class _OpencodeServer:
 
 
 def _with_query(url: str, **params: Optional[str]) -> str:
+    """Append non-None params to `url` as a query string."""
     query = {k: v for k, v in params.items() if v is not None}
     if not query:
         return url
@@ -108,6 +108,7 @@ def _with_query(url: str, **params: Optional[str]) -> str:
 
 
 def _post_json(url: str, payload: dict, timeout: float) -> dict:
+    """POST `payload` as JSON to `url` and return the parsed JSON response."""
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}, method="POST"
@@ -117,6 +118,7 @@ def _post_json(url: str, payload: dict, timeout: float) -> dict:
 
 
 def _raw_text(response: dict) -> Optional[str]:
+    """Concatenate a message response's text parts, for debugging."""
     text = "".join(
         part.get("text", "")
         for part in response.get("parts", [])

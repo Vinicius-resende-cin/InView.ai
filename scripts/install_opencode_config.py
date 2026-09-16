@@ -1,14 +1,6 @@
 """Sync this project's opencode.json + .opencode/skills into opencode's
-global config directory (~/.config/opencode).
-
-Why this is needed: opencode's HTTP API scopes both "which project config
-applies" and "what directory the agent's read/grep/glob tools operate in"
-together, via the same `directory` query param on /session and
-/session/:id/message. Project-level opencode.json is only picked up when
-`directory` points at *this* project - but for Mode 1/2 review, `directory`
-needs to point at the merge scenario's own checkout (input.source_root), so
-our custom agents/provider/skill must live in the global config instead,
-which opencode loads regardless of the target directory.
+global config directory (~/.config/opencode). See README's Implementation
+notes for why this is needed.
 
 Run this once after editing opencode.json or .opencode/skills/, and again
 any time those change. Safe to re-run (idempotent merge).
@@ -25,6 +17,8 @@ GLOBAL_CONFIG_DIR = Path.home() / ".config" / "opencode"
 
 
 def _merge_opencode_json() -> None:
+    """Merge this project's opencode.json into the global one (plugins
+    unioned; provider/agent blocks overridden by the project's own)."""
     project_path = PROJECT_ROOT / "opencode.json"
     project_config = json.loads(project_path.read_text(encoding="utf-8"))
 
@@ -50,6 +44,8 @@ def _merge_opencode_json() -> None:
 
 
 def _sync_skills() -> None:
+    """Copy every skill under .opencode/skills/ into the global skills dir,
+    replacing any existing copy."""
     project_skills = PROJECT_ROOT / ".opencode" / "skills"
     if not project_skills.is_dir():
         return
@@ -67,6 +63,7 @@ def _sync_skills() -> None:
 
 
 def main() -> int:
+    """Merge opencode.json and sync skills into opencode's global config."""
     _merge_opencode_json()
     _sync_skills()
     print("\nRestart any running `opencode serve` for changes to take effect.")

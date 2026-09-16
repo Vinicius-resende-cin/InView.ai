@@ -23,6 +23,8 @@ _LINES_RE = re.compile(
 
 
 class ClassAuthorship(BaseModel):
+    """Per-line authorship (Left/Right, added/deleted) for one class."""
+
     left_added: list[int] = []
     left_deleted: list[int] = []
     right_added: list[int] = []
@@ -38,6 +40,7 @@ class ClassAuthorship(BaseModel):
 
 
 def _parse_int_list(values: str) -> list[int]:
+    """Parse a comma-separated line-number list, e.g. "7, 9" -> [7, 9]."""
     values = values.strip()
     if not values:
         return []
@@ -84,4 +87,5 @@ def parse_modified_lines(text: str) -> dict[str, ClassAuthorship]:
 
 
 def load_modified_lines(path: str | Path) -> dict[str, ClassAuthorship]:
+    """Read and parse a modified-lines.txt file."""
     return parse_modified_lines(Path(path).read_text(encoding="utf-8"))
