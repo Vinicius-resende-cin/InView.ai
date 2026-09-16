@@ -87,6 +87,32 @@ extra attempts) if a run doesn't come back with schema-valid structured
 output — models vary a lot in how reliably they end their turn with an
 actual structured result instead of free-form text.
 
+### Adding Ollama models
+
+The `opencode` backend's Ollama models aren't auto-discovered; each one
+needs an entry in `opencode.json` under `provider.ollama.models`:
+
+```json
+"provider": {
+  "ollama": {
+    "models": {
+      "qwen2.5-coder:14b": { "name": "Qwen2.5 Coder 14B" }
+    }
+  }
+}
+```
+
+The key is the exact model tag Ollama uses (`ollama list` to check), the
+`name` is just a display label. Then:
+
+1. Make sure Ollama actually has that model: `ollama pull <tag>` (this is
+   also required for Ollama-cloud-proxied tags, e.g. `*-cloud` suffixed
+   models — pulling registers the alias even though no weights are
+   downloaded locally).
+2. Re-sync opencode's global config: `python scripts/install_opencode_config.py`,
+   then restart any running `opencode serve`.
+3. Point `config.yaml`'s `llm.model` at the new tag.
+
 ### Reading the real source, not just the diff
 
 Setting `input.source_root` to a checkout of the codebase the diff applies
