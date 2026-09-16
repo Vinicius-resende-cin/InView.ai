@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-
 from src.config import DependencyTypeConfig
 from src.parsing.annotate import AnnotatedFile
 from src.parsing.dependency_parser import DependencySet
@@ -46,10 +44,11 @@ def build_review_messages(
     dependency_types: list[DependencyTypeConfig],
     annotated_diff: list[AnnotatedFile],
     dependencies: DependencySet,
-) -> list[BaseMessage]:
+) -> tuple[str, str]:
+    """Returns (system_text, human_text)."""
     system = _SYSTEM_TEMPLATE.format(definitions=render_definitions(dependency_types))
     human = _HUMAN_TEMPLATE.format(
         diff=render_annotated_diff(annotated_diff),
         dependencies=render_dependencies(dependencies),
     )
-    return [SystemMessage(content=system), HumanMessage(content=human)]
+    return system, human

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-
 from src.config import DependencyTypeConfig
 from src.parsing.annotate import AnnotatedFile
 from src.prompts.definitions import render_definitions, render_types_to_detect
@@ -39,10 +37,11 @@ lines are unchanged context.
 
 def build_detect_messages(
     dependency_types: list[DependencyTypeConfig], annotated_diff: list[AnnotatedFile]
-) -> list[BaseMessage]:
+) -> tuple[str, str]:
+    """Returns (system_text, human_text)."""
     system = _SYSTEM_TEMPLATE.format(
         definitions=render_definitions(dependency_types),
         types_to_detect=render_types_to_detect(dependency_types),
     )
     human = _HUMAN_TEMPLATE.format(diff=render_annotated_diff(annotated_diff))
-    return [SystemMessage(content=system), HumanMessage(content=human)]
+    return system, human

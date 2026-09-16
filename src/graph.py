@@ -1,11 +1,9 @@
-"""LangGraph pipeline: load inputs -> build prompt -> call agent -> save output."""
+"""Pipeline: load inputs -> build prompt -> call agent -> save output."""
 
 from __future__ import annotations
 
 from typing import Any, Optional, TypedDict
 
-from langchain_core.messages import BaseMessage
-from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
 from src.agent_client import run_agent
@@ -24,7 +22,7 @@ class GraphState(TypedDict, total=False):
     config: AppConfig
     annotated_diff: list[AnnotatedFile]
     dependencies: Optional[DependencySet]
-    messages: list[BaseMessage]
+    messages: tuple[str, str]
     structured_result: Optional[dict]
     raw_response: Optional[str]
     parse_error: Optional[str]
@@ -65,15 +63,15 @@ def build_prompt(state: GraphState) -> dict:
 
 def call_agent(state: GraphState) -> dict:
     config = state["config"]
-    messages = state["messages"]
+    system_text, human_text = state["messages"]
     result_model = _result_model_for_mode(config.mode)
 
     return run_agent(
         agent_config=config.agent,
         llm_config=config.llm,
         agent_name=_agent_name_for_mode(config.mode),
-        system_text=str(messages[0].content),
-        human_text=str(messages[1].content),
+        system_text=system_text,
+        human_text=human_text,
         result_model=result_model,
         source_root=config.input.source_root,
     )
@@ -84,22 +82,11 @@ def save_output(state: GraphState) -> dict:
     return {}
 
 
-def build_graph():
-    graph = StateGraph(GraphState)
-    graph.add_node("load_inputs", load_inputs)
-    graph.add_node("build_prompt", build_prompt)
-    graph.add_node("call_agent", call_agent)
-    graph.add_node("save_output", save_output)
-
-    graph.set_entry_point("load_inputs")
-    graph.add_edge("load_inputs", "build_prompt")
-    graph.add_edge("build_prompt", "call_agent")
-    graph.add_edge("call_agent", "save_output")
-    graph.add_edge("save_output", END)
-
-    return graph.compile()
+_PIPELINE = (load_inputs, build_prompt, call_agent, save_output)
 
 
 def run_pipeline(config: AppConfig) -> dict[str, Any]:
-    graph = build_graph()
-    return graph.invoke({"config": config})
+    state: GraphState = {"config": config}
+    for step in _PIPELINE:
+        state.update(step(state))
+    return dict(state)
