@@ -75,6 +75,7 @@ def call_agent(state: GraphState) -> dict:
         system_text=str(messages[0].content),
         human_text=str(messages[1].content),
         result_model=result_model,
+        source_root=config.input.source_root,
     )
 
 

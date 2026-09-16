@@ -24,6 +24,19 @@ input:
   modified_lines_file: samples/modified-lines.txt
   # only required when mode: review
   dependencies_file: samples/dependencies.sample.json
+  # optional: checkout of the merged codebase the diff applies to. When set,
+  # the review agent's read/grep/glob tools are scoped to this directory so
+  # it can open the full source files the diff only shows hunks of (e.g.
+  # /path/to/checked-out/repo). Leave unset to fall back to reasoning from
+  # the annotated diff text alone, as before.
+  # source_root: /path/to/checked-out/repo
+
+agent:
+  # Connection to the opencode server running the review agents (see
+  # opencode.json). Defaults shown; auto_start spawns `opencode serve`
+  # itself if base_url isn't already reachable.
+  # base_url: http://localhost:4096
+  # auto_start: true
 
 output:
   path: output.json

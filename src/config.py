@@ -33,6 +33,11 @@ class InputConfig(BaseModel):
     diff_file: Path
     modified_lines_file: Path
     dependencies_file: Optional[Path] = None
+    # Checkout of the merged codebase the diff applies to. When set, the
+    # review agent's read/grep/glob tools are scoped to this directory so it
+    # can open the full source files the diff only shows hunks of, instead
+    # of working from the annotated diff text alone.
+    source_root: Optional[Path] = None
 
 
 class OutputConfig(BaseModel):
@@ -62,6 +67,15 @@ class AppConfig(BaseModel):
     output: OutputConfig
     agent: AgentConfig = Field(default_factory=AgentConfig)
     dependency_types: list[DependencyTypeConfig] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_empty_agent_block(cls, data: object) -> object:
+        # An `agent:` key present but with no sub-keys parses as YAML null;
+        # treat that the same as the key being absent entirely.
+        if isinstance(data, dict) and data.get("agent") is None:
+            data = {**data, "agent": {}}
+        return data
 
     @model_validator(mode="after")
     def _check_review_mode_requirements(self) -> "AppConfig":

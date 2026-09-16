@@ -14,7 +14,9 @@ import json
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel
@@ -73,6 +75,13 @@ class OpencodeServer:
             self._proc.terminate()
 
 
+def _with_query(url: str, **params: Optional[str]) -> str:
+    query = {k: v for k, v in params.items() if v is not None}
+    if not query:
+        return url
+    return f"{url}?{urllib.parse.urlencode(query)}"
+
+
 def _post_json(url: str, payload: dict, timeout: float) -> dict:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -98,11 +107,22 @@ def run_agent(
     system_text: str,
     human_text: str,
     result_model: type[BaseModel],
+    source_root: Optional[Path] = None,
 ) -> dict:
-    """Send one message to `agent_name` and return the pipeline's result dict."""
+    """Send one message to `agent_name` and return the pipeline's result dict.
+
+    When `source_root` is given, the session's read/grep/glob tools are
+    scoped to that directory, so the agent can open the full source files
+    the diff only shows hunks of instead of working from the diff text alone.
+    """
     server = OpencodeServer(agent_config)
     try:
-        session = _post_json(f"{server.base_url}/session", {}, agent_config.request_timeout)
+        directory = str(source_root) if source_root is not None else None
+        session = _post_json(
+            _with_query(f"{server.base_url}/session", directory=directory),
+            {},
+            agent_config.request_timeout,
+        )
         session_id = session["id"]
 
         provider_id = _PROVIDER_MAP.get(llm_config.provider, llm_config.provider)
@@ -117,7 +137,9 @@ def run_agent(
             },
         }
         response = _post_json(
-            f"{server.base_url}/session/{session_id}/message",
+            _with_query(
+                f"{server.base_url}/session/{session_id}/message", directory=directory
+            ),
             body,
             agent_config.request_timeout,
         )
