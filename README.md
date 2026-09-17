@@ -185,7 +185,10 @@ numbers correspond to the merged version.
      python scripts/install_opencode_config.py
      ```
    - Authenticate whichever `llm.provider` you'll use:
-     `opencode auth login --provider <ollama|gemini|openrouter|anthropic>`.
+     `opencode auth login --provider <gemini|openrouter|anthropic>`. Ollama
+     doesn't go through opencode's auth — it runs locally, so no login is
+     needed unless you're using Ollama-cloud-proxied models, in which case
+     run `ollama signin` instead.
 
 3. **For the `claude_code` backend**
    - Install [Claude Code](https://claude.com/code).
