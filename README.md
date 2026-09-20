@@ -20,7 +20,8 @@ Results can then be scored against that tool's own output.
 - [Project structure](#project-structure)
   - [Static-analysis input format (Mode 2)](#static-analysis-input-format-mode-2)
 - [Installation](#installation)
-  - [Adding Ollama models](#adding-ollama-models)
+  - [Using the ollama provider](#using-the-ollama-provider)
+  - [Adding ollama models](#adding-ollama-models)
 - [Usage](#usage)
   - [Comparing against static analysis](#comparing-against-static-analysis)
 - [Implementation notes](#implementation-notes)
@@ -176,7 +177,13 @@ numbers correspond to the merged version.
    pip install -r requirements.txt
    ```
 
-2. **For the `opencode` backend**
+2. **Pick one agent backend** and set it up — see [Agent backends](#agent-backends)
+   for what each one is and when to use it. You only need to follow the
+   steps for the backend you intend to use (`agent.backend` in
+   `config.yaml`); the other backend's setup can be skipped entirely.
+
+   <b>Option A — <code>opencode</code></b> (default, pay-per-token API keys, multiple providers)
+
    - Install [opencode](https://opencode.ai/docs) and Node.js.
    - Sync this project's agent/skill config into opencode's global config
      (needed because opencode scopes both config discovery and tool-root
@@ -186,14 +193,34 @@ numbers correspond to the merged version.
      ```
    - Authenticate whichever `llm.provider` you'll use:
      `opencode auth login --provider <gemini|openrouter|anthropic>`. Ollama
-     doesn't go through opencode's auth — it runs locally, so no login is
-     needed unless you're using Ollama-cloud-proxied models, in which case
-     run `ollama signin` instead.
+     doesn't go through opencode's auth — see below.
 
-3. **For the `claude_code` backend**
+   <b>Option B — <code>claude_code</code></b> (Claude Pro/Max subscription login)
+
    - Install [Claude Code](https://code.claude.com/docs/quickstart).
    - Log in once: interactively (`claude`), or on a headless machine,
      `claude setup-token` (requires a Claude subscription).
+
+### Using the Ollama provider
+
+`llm.provider: ollama` is one of the four
+`llm.provider` choices (alongside `gemini`, `openrouter`, `anthropic`) and
+only applies to the `opencode` backend — `claude_code` always talks to
+Claude, regardless of `llm.provider`. It's worth reaching for when you
+want to avoid pay-per-token API costs, keep the diff/source files on your
+own machine instead of sending them to a hosted API, or just experiment
+with an open-weight model:
+
+- How to use it: install Ollama, `ollama pull <tag>` the model you want,
+  then set `llm.provider: ollama` and `llm.model: <tag>` in
+  `config.yaml`. Two Ollama-cloud models (`gemma4:31b-cloud`,
+  `gpt-oss:20b-cloud`) are already registered in `opencode.json`; any
+  other tag needs to be added first — see
+  [Adding Ollama models](#adding-ollama-models).
+- Login: not needed for models running fully locally. For
+  Ollama-cloud-proxied tags (the `*-cloud` suffixed ones above), run
+  `ollama signin` instead — that's Ollama's own login, unrelated to
+  `opencode auth`.
 
 ### Adding Ollama models
 
