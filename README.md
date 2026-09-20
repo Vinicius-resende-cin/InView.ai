@@ -191,7 +191,7 @@ numbers correspond to the merged version.
      run `ollama signin` instead.
 
 3. **For the `claude_code` backend**
-   - Install [Claude Code](https://claude.com/code).
+   - Install [Claude Code](https://code.claude.com/docs/quickstart).
    - Log in once: interactively (`claude`), or on a headless machine,
      `claude setup-token` (requires a Claude subscription).
 
