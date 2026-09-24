@@ -24,6 +24,7 @@ Results can then be scored against that tool's own output.
   - [Adding ollama models](#adding-ollama-models)
 - [Usage](#usage)
   - [Comparing against static analysis](#comparing-against-static-analysis)
+  - [Running a multi-model experiment](#running-a-multi-model-experiment)
 - [Implementation notes](#implementation-notes)
 - [License](#license)
 
@@ -291,6 +292,41 @@ python -m src.compare --config config.yaml --llm-output results/output.json --ou
 This matches dependencies by type and by overlapping (class, line) sets
 (greedy, largest overlap first) and reports how many were found by both,
 only by the LLM, and only by the tool.
+
+### Running a multi-model experiment
+
+`scripts/run_experiment.py` runs Mode 1 (`detect`) repeatedly across one or
+more models and compares each run against the static-analysis tool's
+findings, without having to hand-edit `config.yaml` between runs:
+
+```
+python -m scripts.run_experiment --models gpt-oss:20b-cloud claude:sonnet --runs 5
+```
+
+- **`--models`** — space-separated list of models to run. A plain name
+  (e.g. `gpt-oss:20b-cloud`) runs through the `opencode` backend with
+  `llm.provider` left as configured in the base config; a name prefixed
+  with `claude:` (e.g. `claude:sonnet`) is routed through the `claude_code`
+  backend instead, with everything after the prefix used as the model.
+- **`--runs`** (`-n`) — how many times to run Mode 1 per model.
+- **`--config`** — base YAML config to start from (default: `config.yaml`).
+  Only `mode`, `llm.model`, `agent.backend`, and `output.path` are
+  overridden per run; everything else (`input.*`, `llm.provider`, etc.)
+  stays as configured there.
+- **`--results-dir`** — where per-run folders are written, one per
+  `<model>_run<N>/` containing that run's `output.json` and `comparison.csv`
+  (default: `results`).
+- **`--dependencies`** — static-analysis dependencies JSON to score against;
+  defaults to the base config's `input.dependencies_file`.
+- **`--summary-out`** — where to write the summary CSV (default:
+  `<results-dir>/summary.csv`).
+
+A run that crashes or comes back with a `parse_error` is excluded from that
+model's scoring but doesn't abort the rest of the experiment. Once all runs
+finish, a summary table is printed and saved to `results/summary.csv`,
+showing the static-analysis tool's dependency count alongside each model's
+maximum, minimum, and median number of detected dependencies across its
+runs.
 
 ## Implementation notes
 
