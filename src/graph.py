@@ -61,10 +61,15 @@ def build_prompt(state: GraphState) -> dict:
     dependencies) into a system/human prompt pair."""
     config = state["config"]
     if config.mode == "detect":
-        messages = build_detect_messages(config.dependency_types, state["annotated_diff"])
+        messages = build_detect_messages(
+            config.dependency_types, state["annotated_diff"], config.input.source_root
+        )
     else:
         messages = build_review_messages(
-            config.dependency_types, state["annotated_diff"], state["dependencies"]
+            config.dependency_types,
+            state["annotated_diff"],
+            state["dependencies"],
+            config.input.source_root,
         )
     return {"messages": messages}
 

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+
 from src.config import DependencyTypeConfig
 from src.parsing.annotate import AnnotatedFile
 from src.parsing.dependency_parser import DependencySet
 from src.prompts.definitions import render_definitions
 from src.prompts.dependency_rendering import render_dependencies
 from src.prompts.diff_rendering import render_annotated_diff
+from src.prompts.source_rendering import render_source_root
 
 _SYSTEM_TEMPLATE = """\
 You are a code reviewer analyzing a merge scenario in which two developers, \
@@ -37,18 +41,21 @@ lines are unchanged context.
 {diff}
 
 {dependencies}
-"""
+
+{source_root}"""
 
 
 def build_review_messages(
     dependency_types: list[DependencyTypeConfig],
     annotated_diff: list[AnnotatedFile],
     dependencies: DependencySet,
+    source_root: Optional[Path] = None,
 ) -> tuple[str, str]:
     """Returns (system_text, human_text)."""
     system = _SYSTEM_TEMPLATE.format(definitions=render_definitions(dependency_types))
     human = _HUMAN_TEMPLATE.format(
         diff=render_annotated_diff(annotated_diff),
         dependencies=render_dependencies(dependencies),
+        source_root=render_source_root(source_root),
     )
     return system, human
