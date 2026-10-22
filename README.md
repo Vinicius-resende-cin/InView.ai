@@ -328,6 +328,73 @@ showing the static-analysis tool's dependency count alongside each model's
 maximum, minimum, and median number of detected dependencies across its
 runs.
 
+### Running the static-analysis tool next to the agents
+
+`scripts/run_static_analysis.py` runs the [conflict-static-analysis](https://github.com/spgroup/conflict-static-analysis)
+tool on the same scenarios as the agents (`dataset/`, see `scripts/prepare_dataset.py`),
+inside Docker, with the three analyses that correspond to the dependency types:
+
+| Type | Analysis (`-mode`) |
+|---|---|
+| Direct Flow (DF) | `svfa-interprocedural` |
+| Confluence Flow (CF) | `dfp-confluence-interprocedural` |
+| Overriding Assignment (OA) | `ioa` |
+
+Each one runs in both directions (the left lines as sinks and the right lines as
+sources, then the other way round), on the merge's jar from the dataset's
+`original-without-dependencies` build, with a 30-minute timeout per run, as in the
+study. A scenario whose classes are in different jars gets one run per jar.
+
+```
+python -m scripts.run_static_analysis --mergedataset /.../mergedataset --build-tool   # once
+python -m scripts.run_static_analysis --mergedataset /.../mergedataset --jobs 3
+```
+
+`--build-tool` builds the tool from the `conflict-static-analysis` checkout (`--tool-dir`)
+in a container, with the `docker/Dockerfile` of this project (the tool's own Docker
+environment: Ubuntu 22.04, OpenJDK 8 and Maven 3.8.8, without its clones of the
+dataset). Maven needs the GitHub packages credentials of `~/.m2/settings.xml`
+(see the tool's README); the container sees that file read-only. Results go to
+`results/analysis/<scenario>/<jar>/<direction>/<mode>/` (`out.json`, `console.txt`,
+`status.json`); runs whose `status.json` exists are not repeated unless `--force`.
+
+To run it **in parallel with the agents**, add `--with-analysis` to the experiment:
+
+```
+python -m scripts.run_dataset_experiment --models claude:sonnet --runs 3 \
+    --with-analysis --mergedataset /.../mergedataset
+```
+
+(`--analysis-jobs`, `--analysis-timeout`, `--analysis-results-dir`, `--tool-dir` tune it.)
+At the end it waits for the tool and prints the full report: the two comparison tables
+below and a report of every run of the tool that ended in error (cause, explanation and
+what can be done). It is written to `results/analysis/comparison_report.txt` (the errors
+alone to `results/analysis/errors_report.md`, the per-scenario numbers to
+`comparison_by_scenario.csv`), and can be produced on its own with
+`python -m scripts.compare_analysis [--models claude-sonnet ...]`.
+
+To redo everything from scratch (agents and tool, no result reused):
+
+```
+python -m scripts.run_dataset_experiment --models claude:sonnet --runs 3     --with-analysis --force-analysis --evaluate-by-method     --mergedataset /.../mergedataset
+```
+
+Leave out `--skip-existing` (the agents then run again and overwrite `results/dataset`);
+`--force-analysis` repeats the tool's runs too. `--analysis-heap` (3g by default) and
+`--analysis-jobs` tune the tool's memory, which the largest jars (druid) need raised.
+
+There is no ground truth in this comparison: it sets the results of the tool and of
+the LLMs against each other. It has two parts: **(1)** how many dependencies each
+reported, and **(2)** how many *different* ones, where reports of one type that share
+a (class, line) count as one dependency, and how many of those the tool and each LLM
+agree on (`matched`) or added over each other (`tool only` / `LLM only`). A
+(scenario, type) pair is left out when one of that analysis's runs timed out or
+failed, since the tool's side would be incomplete. Build the tool from its branch
+`fix/confluence-report-crashes` (or a version with those fixes): without them the
+confluence analysis crashes on some scenarios after finding conflicts
+(`head()` of an empty list, a `NullPointerException` while printing a path) and its
+`out.json` is not valid JSON when a statement contains quotes or backslashes.
+
 ## Implementation notes
 
 - **opencode's global config.** opencode ties "which project config
