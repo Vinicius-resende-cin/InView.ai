@@ -68,7 +68,8 @@ class ClaudeCodeAgentClient(AgentClient):
             executable,
             "-p",
             "--system-prompt-file", system_prompt_path,
-            "--output-format", "json",
+            "--output-format", "stream-json",
+            "--verbose",
             "--json-schema", json.dumps(result_model.model_json_schema()),
             "--allowed-tools", "Read,Glob,Grep",
             "--permission-mode", "dontAsk",
@@ -100,13 +101,24 @@ class ClaudeCodeAgentClient(AgentClient):
                 "parse_error": f"claude CLI exited {proc.returncode}: {proc.stderr.strip()}",
             }
 
-        try:
-            response = json.loads(proc.stdout)
-        except json.JSONDecodeError as exc:
+        events = []
+        for line in proc.stdout.splitlines():
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue  # not an event line
+        response = next((e for e in reversed(events) if e.get("type") == "result"), None)
+        rate_limit = next(
+            (e.get("rate_limit_info") for e in reversed(events) if e.get("type") == "rate_limit_event"),
+            None,
+        )
+
+        if response is None:
             return {
                 "structured_result": None,
                 "raw_response": proc.stdout,
-                "parse_error": f"claude CLI output was not valid JSON: {exc}",
+                "parse_error": "claude CLI output had no result event",
+                "rate_limit": rate_limit,
             }
 
         raw_response = response.get("result")
@@ -120,6 +132,7 @@ class ClaudeCodeAgentClient(AgentClient):
                     "claude CLI returned no structured output "
                     f"(subtype={response.get('subtype')!r})"
                 ),
+                "rate_limit": rate_limit,
             }
 
         try:
@@ -129,10 +142,12 @@ class ClaudeCodeAgentClient(AgentClient):
                 "structured_result": None,
                 "raw_response": raw_response,
                 "parse_error": f"structured output failed schema validation: {exc}",
+                "rate_limit": rate_limit,
             }
 
         return {
             "structured_result": parsed.model_dump(),
             "raw_response": raw_response,
             "parse_error": None,
+            "rate_limit": rate_limit,
         }

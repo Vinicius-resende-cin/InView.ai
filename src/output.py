@@ -17,6 +17,8 @@ def write_output(path: str | Path, state: dict[str, Any]) -> None:
         "raw_response": state.get("raw_response") or None,
         "parse_error": state.get("parse_error"),
     }
+    if state.get("rate_limit"):
+        payload["rate_limit"] = state["rate_limit"]
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

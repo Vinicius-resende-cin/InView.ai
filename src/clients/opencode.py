@@ -127,6 +127,24 @@ def _raw_text(response: dict) -> Optional[str]:
     return text or None
 
 
+def _describe_failure(response: dict) -> str:
+    """Explain why a response carries no structured output: the finish
+    reason, opencode's own error (if any), and which kinds of parts came back.
+    """
+    info = response.get("info", {})
+    details = [f"finish={info.get('finish')!r}"]
+
+    error = info.get("error")
+    if error:
+        data = error.get("data") or {}
+        message = data.get("message") if isinstance(data, dict) else None
+        details.append(f"error={error.get('name')}: {message or data}")
+
+    part_types = [part.get("type", "?") for part in response.get("parts", [])]
+    details.append(f"parts={part_types}")
+    return ", ".join(details)
+
+
 class OpencodeAgentClient(AgentClient):
     """Runs reviews through an opencode subagent (dependency-detector /
     dependency-reviewer), any llm.provider opencode itself is configured for.
@@ -199,7 +217,7 @@ class OpencodeAgentClient(AgentClient):
                 "raw_response": raw_response,
                 "parse_error": (
                     "opencode agent returned no structured output "
-                    f"(finish={info.get('finish')!r})"
+                    f"({_describe_failure(response)})"
                 ),
             }
 

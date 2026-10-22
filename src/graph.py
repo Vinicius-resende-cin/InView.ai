@@ -28,6 +28,7 @@ class GraphState(TypedDict, total=False):
     structured_result: Optional[dict]
     raw_response: Optional[str]
     parse_error: Optional[str]
+    rate_limit: Optional[dict]  # claude_code only: the plan's usage window after the run
 
 
 def _result_model_for_mode(mode: str) -> type[BaseModel]:
