@@ -14,6 +14,12 @@
         },
         "gpt-oss:20b-cloud": {
           "name": "GPT-OSS 20B (cloud)"
+        },
+        "gpt-oss:120b-cloud": {
+          "name": "GPT-OSS 120B (cloud)"
+        },
+        "nemotron-3-super:cloud": {
+          "name": "Nemotron 3 Super (cloud)"
         }
       }
     }
