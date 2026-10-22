@@ -1,0 +1,419 @@
+"""Compares what the static-analysis tool and the agents (LLMs) found, on the same
+scenarios. There is no ground truth here: it only compares the results of the
+runs of the tools against each other.
+
+Inputs: `<analysis-dir>` (scripts.run_static_analysis) and `<results-dir>`
+(scripts.run_dataset_experiment). The comparison is by dependency type, with the
+tool's analyses standing for the types: DF = svfa-interprocedural, CF =
+dfp-confluence-interprocedural, OA = ioa.
+
+Part 1 - how many dependencies each tool/LLM reported. For the tool this is every
+finding of its runs (both directions, every jar of the scenario); for an LLM it is
+every dependency of its runs, summed over runs (the per-run mean is shown too).
+
+Part 2 - how many *different* dependencies each reported, and how many of those
+agree. Reports of the same type that share a (class, line) location are one
+distinct dependency (so an LLM repeating itself over several runs counts once, as
+does the tool repeating a finding in both directions). Then, per scenario and
+type, the tool's and an LLM's distinct dependencies are matched one-to-one, largest
+overlap first: `matched` ones were found by both, `tool only` and `LLM only` are the
+detections each added over the other.
+
+A (scenario, type) pair enters the comparison when every run of that type's
+analysis finished (a timeout or error in one direction would make the tool's side
+incomplete) and the LLM has at least one valid run on the scenario.
+
+Usage:
+    python -m scripts.compare_analysis [--models claude-sonnet ...]
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import re
+from collections import defaultdict
+from pathlib import Path
+
+from src.compare import _greedy_match, load_llm_result
+
+TYPE_OF_MODE = {
+    "svfa-interprocedural": ("DF", "Direct Flow"),
+    "dfp-confluence-interprocedural": ("CF", "Confluence Flow"),
+    "ioa": ("OA", "Overriding Assignment"),
+}
+TYPES = ["DF", "CF", "OA"]
+TYPE_NAME = {"DF": "Direct Flow", "CF": "Confluence Flow", "OA": "Overriding Assignment"}
+FINISHED = {"findings", "no-conflicts"}
+RUN_DIR_RE = re.compile(r"^(?P<model>.+)_run(?P<n>\d+)$")
+
+LineSet = frozenset  # of (outer class, line)
+
+
+def _key(class_name: str, line: int) -> tuple[str, int]:
+    """Nested classes count as their outer class: the agents name the outer one."""
+    return class_name.split("$")[0], int(line)
+
+
+# --- the tool's side ---------------------------------------------------------------
+
+
+def _parse_out_json(text: str) -> list[dict] | None:
+    """The tool's out.json is an array it appends to; a run that was cut short can
+    leave it unterminated, so a missing closing bracket is repaired."""
+    text = text.strip()
+    for candidate in (text, re.sub(r",\s*$", "", text) + "\n]"):
+        try:
+            data = json.loads(candidate)
+            return data if isinstance(data, list) else None
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+# The DF and CF analyses write a stack-trace frame as a string,
+# "(<pkg.Class: ret method(args)>, statement, 71)", where OA writes an object.
+_FRAME_STRING = re.compile(r"^\(<(?P<cls>[^:>]+):.*>,.*,\s*(?P<line>-?\d+)\)\s*$", re.DOTALL)
+
+
+def _frame_key(frame) -> tuple[str, int] | None:
+    """(outer class, line) of a stack-trace frame or location, in either shape."""
+    try:
+        if isinstance(frame, dict):
+            return _key(frame["class"], int(frame["line"]))
+        match = _FRAME_STRING.match(frame)
+        return _key(match.group("cls"), int(match.group("line"))) if match else None
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+LENIENT_FILES: list[Path] = []  # out.json files that needed the tolerant reader (reported at the end)
+
+_ENTRY_START = re.compile(r"(?m)^\{\s*$")
+_LOCATION = re.compile(r'"class":\s*"(?P<cls>[^"]+)",\s*"method":.*?"line":\s*"?(?P<line>-?\d+)"?', re.DOTALL)
+_FRAME_LINE = re.compile(r'^\s*"?(?P<frame>\(<[^:>]+:.*>,.*,\s*-?\d+\))"?,?\s*$')
+
+
+def _lenient_line_sets(text: str) -> list[LineSet] | None:
+    """Read locations straight from the text of an out.json that is not valid JSON.
+
+    The confluence analysis writes its statements into the JSON without escaping
+    their double quotes (a Jimple statement like `getDB("admin")` breaks the file),
+    but class and line are all this comparison needs: every finding starts at a `{`
+    in the first column, and its locations and stack-trace frames are recognisable
+    on their own."""
+    chunks = _ENTRY_START.split(text)[1:]
+    sets: list[LineSet] = []
+    for chunk in chunks:
+        lines = set()
+        for match in _LOCATION.finditer(chunk):
+            lines.add(_key(match.group("cls"), int(match.group("line"))))
+        for raw in chunk.splitlines():
+            frame = _FRAME_LINE.match(raw)
+            key = _frame_key(frame.group("frame")) if frame else None
+            if key is not None:
+                lines.add(key)
+        if lines:
+            sets.append(frozenset(lines))
+    return sets or None
+
+
+def tool_line_sets(out_json: Path) -> list[LineSet] | None:
+    """One line set per finding in an out.json (None if it can't be read): every
+    (class, line) of the finding's stack traces and of its source and sink nodes.
+    Findings the tool printed twice are collapsed."""
+    text = out_json.read_text(encoding="utf-8", errors="replace")
+    entries = _parse_out_json(text)
+    if entries is None:
+        sets = _lenient_line_sets(text)
+        if sets is not None:
+            LENIENT_FILES.append(out_json)
+        return sets
+    seen: set[str] = set()
+    sets: list[LineSet] = []
+    for entry in entries:
+        signature = json.dumps(entry, sort_keys=True)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        lines = set()
+        for node in entry.get("body", {}).get("interference", []):
+            for frame in [node.get("location", {}), *(node.get("stackTrace") or [])]:
+                key = _frame_key(frame)
+                if key is not None:
+                    lines.add(key)
+        sets.append(frozenset(lines))
+    return sets
+
+
+def load_tool(analysis_dir: Path, scenario: str) -> dict[str, dict]:
+    """{type: {"complete": bool, "reports": [LineSet], "states": [str]}} for one scenario."""
+    out: dict[str, dict] = {t: {"complete": True, "reports": [], "states": []} for t in TYPES}
+    found_any = False
+    for status_path in sorted((analysis_dir / scenario).glob("*/*/*/status.json")):
+        found_any = True
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        type_key = TYPE_OF_MODE.get(status.get("mode"), (None,))[0]
+        if type_key is None:
+            continue
+        entry = out[type_key]
+        entry["states"].append(status["state"])
+        out_json = status_path.parent / "out.json"
+        sets = tool_line_sets(out_json) if out_json.is_file() else []
+        if sets is None:
+            entry["complete"] = False
+        elif status["state"] not in FINISHED:
+            entry["complete"] = False
+            entry["reports"].extend(sets)  # partial results are kept out of the comparison but noted
+        else:
+            entry["reports"].extend(sets)
+    if not found_any:
+        for t in TYPES:
+            out[t]["complete"] = False
+    for t in TYPES:
+        if not out[t]["states"]:
+            out[t]["complete"] = False
+    return out
+
+
+# --- the LLMs' side ---------------------------------------------------------------
+
+
+def load_llm(results_dir: Path, scenario: str, model_filter: list[str] | None) -> dict[str, dict]:
+    """{model: {"runs": n_valid, "reports": {type: [[LineSet] per run]}}} for one scenario."""
+    out: dict[str, dict] = {}
+    scenario_dir = results_dir / scenario
+    if not scenario_dir.is_dir():
+        return out
+    for run_dir in sorted(scenario_dir.iterdir()):
+        match = RUN_DIR_RE.match(run_dir.name)
+        if not (run_dir.is_dir() and match and (run_dir / "output.json").is_file()):
+            continue
+        model = match.group("model")
+        if model_filter and model not in model_filter:
+            continue
+        try:
+            result = load_llm_result(run_dir / "output.json")
+        except ValueError:
+            continue  # a failed run
+        entry = out.setdefault(model, {"runs": 0, "reports": {t: [] for t in TYPES}})
+        entry["runs"] += 1
+        per_type: dict[str, list[LineSet]] = {t: [] for t in TYPES}
+        for dep in result.dependencies:
+            type_key = next((k for k, name in TYPE_NAME.items() if name == dep.type), None)
+            if type_key is None:
+                continue
+            lines = frozenset(_key(r.class_name, r.line) for r in (*dep.left_lines, *dep.right_lines))
+            per_type[type_key].append(lines)
+        for t in TYPES:
+            entry["reports"][t].append(per_type[t])
+    return out
+
+
+# --- distinct dependencies and matching ----------------------------------------------
+
+
+def distinct(reports: list[LineSet]) -> list[LineSet]:
+    """Merge reports that share a location into one dependency (union-find)."""
+    parent = list(range(len(reports)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    owner: dict[tuple[str, int], int] = {}
+    for i, lines in enumerate(reports):
+        for loc in lines:
+            if loc in owner:
+                parent[find(i)] = find(owner[loc])
+            else:
+                owner[loc] = i
+    merged: dict[int, set] = defaultdict(set)
+    for i, lines in enumerate(reports):
+        merged[find(i)] |= lines
+    return [frozenset(s) for s in merged.values() if s]
+
+
+def compare_scenario(tool_reports: list[LineSet], llm_reports: list[LineSet]) -> dict[str, int]:
+    tool_d, llm_d = distinct(tool_reports), distinct(llm_reports)
+    matched = _greedy_match(list(enumerate(llm_d)), list(enumerate(tool_d)))
+    return {
+        "tool_distinct": len(tool_d),
+        "llm_distinct": len(llm_d),
+        "matched": matched,
+        "tool_only": len(tool_d) - matched,
+        "llm_only": len(llm_d) - matched,
+    }
+
+
+# --- the report ------------------------------------------------------------------------
+
+
+def table(header: list[str], rows: list[list], right_from: int = 1) -> str:
+    cells = [header] + [[str(c) for c in r] for r in rows]
+    widths = [max(len(r[i]) for r in cells) for i in range(len(header))]
+    lines = []
+    for n, row in enumerate(cells):
+        lines.append("  ".join(c.rjust(widths[i]) if i >= right_from else c.ljust(widths[i]) for i, c in enumerate(row)))
+        if n == 0:
+            lines.append("  ".join("-" * w for w in widths))
+    return "\n".join(lines)
+
+
+def pct(a: int, b: int) -> str:
+    return f"{a / b:.0%}" if b else "n/a"
+
+
+def build_report(analysis_dir: Path, results_dir: Path, dataset_dir: Path, model_filter: list[str] | None, csv_out: Path | None) -> str:
+    LENIENT_FILES.clear()
+    scenarios = sorted(p.name for p in analysis_dir.iterdir() if p.is_dir() and (dataset_dir / p.name).is_dir()) if analysis_dir.is_dir() else []
+
+    tool_by_scenario = {s: load_tool(analysis_dir, s) for s in scenarios}
+    llm_by_scenario = {s: load_llm(results_dir, s, model_filter) for s in scenarios}
+    models = sorted({m for s in scenarios for m in llm_by_scenario[s]})
+
+    # run states of the tool
+    states: dict[str, int] = defaultdict(int)
+    for per_type in tool_by_scenario.values():
+        for t in TYPES:
+            for state in per_type[t]["states"]:
+                states[state] += 1
+    state_text = ", ".join(f"{n} {s}" for s, n in sorted(states.items())) or "none"
+
+    # per (scenario, model, type) comparison
+    cell: dict[tuple, dict[str, int]] = {}
+    tool_found = {t: 0 for t in TYPES}
+    tool_distinct = {t: 0 for t in TYPES}
+    tool_scenarios: dict[str, set[str]] = {t: set() for t in TYPES}
+    llm_found = {m: {t: 0 for t in TYPES} for m in models}
+    llm_runs = {m: 0 for m in models}
+    llm_distinct = {m: {t: 0 for t in TYPES} for m in models}
+    llm_scenarios = {m: {t: set() for t in TYPES} for m in models}
+    pairs = {m: 0 for m in models}
+    excluded = 0
+    rows_csv = []
+
+    for s in scenarios:
+        for t in TYPES:
+            tool = tool_by_scenario[s][t]
+            if not tool["complete"]:
+                excluded += 1
+                continue
+            tool_found[t] += len(tool["reports"])
+            tool_distinct[t] += len(distinct(tool["reports"]))
+            if tool["reports"]:
+                tool_scenarios[t].add(s)
+            for m, llm in llm_by_scenario[s].items():
+                runs = llm["reports"][t]
+                flat = [lines for run in runs for lines in run]
+                result = compare_scenario(tool["reports"], flat)
+                cell[(s, m, t)] = result
+                llm_found[m][t] += len(flat)
+                llm_distinct[m][t] += result["llm_distinct"]
+                if flat:
+                    llm_scenarios[m][t].add(s)
+                rows_csv.append(
+                    {
+                        "scenario": s, "model": m, "type": TYPE_NAME[t], "llm_runs": llm["runs"],
+                        "tool_reports": len(tool["reports"]), "llm_reports": len(flat), **result,
+                    }
+                )
+        for m, llm in llm_by_scenario[s].items():
+            if any(tool_by_scenario[s][t]["complete"] for t in TYPES):
+                llm_runs[m] += llm["runs"]
+                pairs[m] += 1
+
+    out: list[str] = []
+    out.append(f"Scenarios with analysis results: {len(scenarios)} | analysis runs: {state_text}")
+    if LENIENT_FILES:
+        out.append(
+            f"{len(set(LENIENT_FILES))} out.json files are not valid JSON (the tool does not escape quotes in "
+            "confluence findings); their locations were read from the raw text."
+        )
+    out.append(f"(scenario, type) pairs left out because an analysis run did not finish: {excluded}")
+    for m in models:
+        out.append(f"{m}: {pairs[m]} scenarios compared, {llm_runs[m]} valid runs")
+
+    # Part 1
+    out.append("\n\n=== Part 1 - dependencies found by each tool / LLM ===\n")
+    rows = [["Analysis tool", *[tool_found[t] for t in TYPES], sum(tool_found.values()),
+             sum(len(tool_scenarios[t]) for t in TYPES) and len(set().union(*tool_scenarios.values()))]]
+    for m in models:
+        total = sum(llm_found[m].values())
+        scen = len(set().union(*llm_scenarios[m].values())) if llm_scenarios[m] else 0
+        rows.append([f"{m} (all runs)", *[llm_found[m][t] for t in TYPES], total, scen])
+        mean = lambda t: f"{llm_found[m][t] / llm_runs[m]:.2f}" if llm_runs[m] else "n/a"
+        rows.append([f"{m} (mean per run)", *[mean(t) for t in TYPES], f"{total / llm_runs[m]:.2f}" if llm_runs[m] else "n/a", ""])
+    out.append(table(["Source", *TYPES, "Total", "Scenarios with >=1"], rows))
+    out.append("\nThe tool's count is every finding of its runs, both directions; an LLM's is summed over its runs.")
+
+    # Part 2
+    out.append("\n\n=== Part 2 - different dependencies, and how many agree ===\n")
+    out.append("Reports of one type that share a (class, line) are one distinct dependency. 'Matched' = found by both;")
+    out.append("'tool only' / 'LLM only' = what each added over the other.\n")
+    for m in models:
+        rows = []
+        totals = {k: 0 for k in ("tool_distinct", "llm_distinct", "matched", "tool_only", "llm_only")}
+        for t in TYPES:
+            agg = {k: sum(cell[(s, m, t)][k] for s in scenarios if (s, m, t) in cell) for k in totals}
+            for k in totals:
+                totals[k] += agg[k]
+            rows.append([TYPE_NAME[t], agg["tool_distinct"], agg["llm_distinct"], agg["matched"], agg["tool_only"], agg["llm_only"],
+                         pct(agg["matched"], agg["tool_distinct"]), pct(agg["matched"], agg["llm_distinct"])])
+        rows.append(["Total", totals["tool_distinct"], totals["llm_distinct"], totals["matched"], totals["tool_only"], totals["llm_only"],
+                     pct(totals["matched"], totals["tool_distinct"]), pct(totals["matched"], totals["llm_distinct"])])
+        out.append(f"Analysis tool vs {m}\n")
+        out.append(table(["Type", "Tool distinct", "LLM distinct", "Matched", "Tool only", "LLM only", "% of tool matched", "% of LLM matched"], rows))
+        out.append("")
+
+    if csv_out and rows_csv:
+        with csv_out.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows_csv[0]))
+            writer.writeheader()
+            writer.writerows(rows_csv)
+        out.append(f"Per-scenario numbers written to {csv_out}")
+    return "\n".join(out)
+
+
+def full_report(
+    analysis_dir: Path, results_dir: Path, dataset_dir: Path, model_filter: list[str] | None,
+    csv_out: Path | None = None, output: Path | None = None,
+) -> str:
+    """Both comparison tables plus the report of the tool's errors. Also written to
+    <analysis-dir>/comparison_report.txt (`output`) and, the errors alone, to
+    <analysis-dir>/errors_report.md."""
+    from scripts.analysis_errors import build_errors_report
+
+    csv_out = csv_out or analysis_dir / "comparison_by_scenario.csv"
+    errors = build_errors_report(analysis_dir)
+    (analysis_dir / "errors_report.md").write_text(errors, encoding="utf-8")
+    report = build_report(analysis_dir, results_dir, dataset_dir, model_filter, csv_out)
+    report += "\n\n\n=== Errors of the analysis tool ===\n\n" + errors
+    (output or analysis_dir / "comparison_report.txt").write_text(report, encoding="utf-8")
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--analysis-dir", default="results/analysis", help="Output of run_static_analysis (default: results/analysis).")
+    parser.add_argument("--results-dir", default="results/dataset", help="Output of run_dataset_experiment (default: results/dataset).")
+    parser.add_argument("--dataset-dir", default="dataset", help="Output of prepare_dataset (default: dataset).")
+    parser.add_argument("--models", nargs="+", help="Only these model folder names (e.g. claude-sonnet).")
+    parser.add_argument("--csv", help="Per-scenario CSV (default: <analysis-dir>/comparison_by_scenario.csv).")
+    parser.add_argument("--output", help="Text file for the full report (default: <analysis-dir>/comparison_report.txt).")
+    args = parser.parse_args(argv)
+
+    analysis_dir = Path(args.analysis_dir)
+    print(full_report(
+        analysis_dir, Path(args.results_dir), Path(args.dataset_dir), args.models,
+        Path(args.csv) if args.csv else None, Path(args.output) if args.output else None,
+    ))
+    print(f"\nReport written to {Path(args.output) if args.output else analysis_dir / 'comparison_report.txt'}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
