@@ -5,3 +5,4 @@ venv/
 .env
 output.json
 results/
+dataset/
