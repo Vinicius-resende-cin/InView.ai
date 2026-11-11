@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from datetime import datetime
 from typing import Any, Optional, TypedDict
 
 from pydantic import BaseModel
@@ -29,6 +31,10 @@ class GraphState(TypedDict, total=False):
     raw_response: Optional[str]
     parse_error: Optional[str]
     rate_limit: Optional[dict]  # claude_code only: the plan's usage window after the run
+    usage: Optional[list]  # per attempt: tokens, cost, exact model id as the backend reports them
+    started_at: str  # ISO 8601 with time zone: when the agent call began and ended
+    ended_at: str
+    seconds: float
 
 
 def _result_model_for_mode(mode: str) -> type[BaseModel]:
@@ -83,7 +89,8 @@ def call_agent(state: GraphState) -> dict:
     result_model = _result_model_for_mode(config.mode)
     client = get_client(config.agent)
 
-    return client.run(
+    started, clock = datetime.now().astimezone(), time.monotonic()
+    result = client.run(
         llm_config=config.llm,
         agent_name=_agent_name_for_mode(config.mode),
         system_text=system_text,
@@ -91,6 +98,12 @@ def call_agent(state: GraphState) -> dict:
         result_model=result_model,
         source_root=config.input.source_root,
     )
+    return {
+        **result,
+        "started_at": started.isoformat(timespec="seconds"),
+        "ended_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "seconds": round(time.monotonic() - clock, 1),
+    }
 
 
 def save_output(state: GraphState) -> dict:

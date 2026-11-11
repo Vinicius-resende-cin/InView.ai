@@ -38,6 +38,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
+import hashlib
 import json
 import re
 import subprocess
@@ -45,6 +47,7 @@ import sys
 import threading
 import time
 import zipfile
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,6 +84,24 @@ def log(message: str) -> None:
 def find_tool_jar(tool_dir: Path) -> Path | None:
     jars = sorted((tool_dir / "target").glob("soot-analysis-*-jar-with-dependencies.jar"))
     return jars[-1] if jars else None
+
+
+@functools.lru_cache(maxsize=None)
+def tool_version(tool_jar: Path) -> dict:
+    """Which build a jar is: the commit and tag of the checkout it sits in (`<checkout>/target/`)
+    and the jar's own SHA-256, recorded in every run's status.json so builds can't be mixed unnoticed."""
+    repo = tool_jar.parent.parent
+
+    def git(*args: str) -> str | None:
+        proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+        return proc.stdout.strip() or None if proc.returncode == 0 else None
+
+    return {
+        "commit": git("rev-parse", "HEAD"),
+        "describe": git("describe", "--tags", "--always"),  # nearest tag, e.g. article_ioa_2025-3-gad6b0a0
+        "jar": tool_jar.name,
+        "jar_sha256": hashlib.sha256(tool_jar.read_bytes()).hexdigest(),
+    }
 
 
 def ensure_image() -> None:
@@ -268,6 +289,7 @@ def run_job(job: Job, tool_jar: Path, mergedataset: Path, timeout: int, heap: st
         "timeout", str(timeout), "java", "-jar", "/tool/tool.jar",
         "-cp", job.classpath, "-csv", "/work/changes.csv", "-mode", job.mode,
     ]
+    started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     start = time.monotonic()
     try:
         proc = subprocess.run(command, capture_output=True, timeout=timeout + 120)
@@ -292,6 +314,8 @@ def run_job(job: Job, tool_jar: Path, mergedataset: Path, timeout: int, heap: st
     status = {
         "state": state, "exit_code": exit_code, "seconds": seconds, "mode": job.mode,
         "direction": job.direction, "classpath": job.classpath, "has_out_json": out_json.is_file(),
+        "started_at": started_at, "ended_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "tool": tool_version(tool_jar),
     }
     status_path.write_text(json.dumps(status, indent=2), encoding="utf-8")
     log(f"[analysis] {job.label}: {state} ({seconds}s)")

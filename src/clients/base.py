@@ -13,7 +13,9 @@ from src.config import AgentConfig, LLMConfig
 
 class AgentClient(ABC):
     """Runs one review task against a backend, returning
-    {"structured_result", "raw_response", "parse_error"}.
+    {"structured_result", "raw_response", "parse_error", "usage"}, where
+    "usage" lists one backend-reported usage record per attempt (tokens, cost,
+    exact model id; each backend decides which fields it has).
 
     Owns the retry loop shared by every backend: models vary a lot in how
     reliably they end their turn with a valid structured-output result
@@ -38,11 +40,14 @@ class AgentClient(ABC):
         try:
             attempts = max(1, self.agent_config.max_retries + 1)
             result: dict = {}
+            usage: list = []
             for _ in range(attempts):
                 result = self._run_once(
                     llm_config, agent_name, system_text, human_text,
                     result_model, source_root,
                 )
+                usage.append(result.pop("usage", None))
+                result["usage"] = usage
                 if result["parse_error"] is None:
                     return result
 
@@ -68,4 +73,5 @@ class AgentClient(ABC):
         source_root: Optional[Path],
     ) -> dict:
         """One attempt. Must return
-        {"structured_result", "raw_response", "parse_error"}."""
+        {"structured_result", "raw_response", "parse_error"}, and may add
+        "usage" (a dict) for the attempt."""

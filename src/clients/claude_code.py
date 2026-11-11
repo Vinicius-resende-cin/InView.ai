@@ -123,6 +123,12 @@ class ClaudeCodeAgentClient(AgentClient):
 
         raw_response = response.get("result")
         structured = response.get("structured_output")
+        # tokens, cost and the exact model id (the keys of modelUsage) of this attempt
+        usage = {
+            key: response.get(key)
+            for key in ("usage", "modelUsage", "total_cost_usd", "duration_ms", "num_turns", "session_id")
+            if key in response
+        }
 
         if response.get("is_error") or structured is None:
             return {
@@ -133,6 +139,7 @@ class ClaudeCodeAgentClient(AgentClient):
                     f"(subtype={response.get('subtype')!r})"
                 ),
                 "rate_limit": rate_limit,
+                "usage": usage,
             }
 
         try:
@@ -143,6 +150,7 @@ class ClaudeCodeAgentClient(AgentClient):
                 "raw_response": raw_response,
                 "parse_error": f"structured output failed schema validation: {exc}",
                 "rate_limit": rate_limit,
+                "usage": usage,
             }
 
         return {
@@ -150,4 +158,5 @@ class ClaudeCodeAgentClient(AgentClient):
             "raw_response": raw_response,
             "parse_error": None,
             "rate_limit": rate_limit,
+            "usage": usage,
         }

@@ -210,6 +210,10 @@ class OpencodeAgentClient(AgentClient):
         info = response.get("info", {})
         structured = info.get("structured")
         raw_response = _raw_text(response)
+        usage = {  # tokens, cost and the exact model that answered
+            "tokens": info.get("tokens"), "cost": info.get("cost"),
+            "providerID": info.get("providerID"), "modelID": info.get("modelID"),
+        }
 
         if structured is None:
             return {
@@ -219,6 +223,7 @@ class OpencodeAgentClient(AgentClient):
                     "opencode agent returned no structured output "
                     f"({_describe_failure(response)})"
                 ),
+                "usage": usage,
             }
 
         try:
@@ -228,10 +233,12 @@ class OpencodeAgentClient(AgentClient):
                 "structured_result": None,
                 "raw_response": raw_response,
                 "parse_error": f"structured output failed schema validation: {exc}",
+                "usage": usage,
             }
 
         return {
             "structured_result": parsed.model_dump(),
             "raw_response": raw_response,
             "parse_error": None,
+            "usage": usage,
         }
