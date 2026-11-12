@@ -24,8 +24,8 @@ follow data flow from sources to sinks. This follows how the study ran the tool
 - 30 minutes per run, as in the study; on a timeout the tool exports the partial
   results it has.
 
-The tool is the one built from `--tool-dir` (default: the conflict-static-analysis
-checkout), run inside the `conflict-analysis-runner` image (docker/Dockerfile:
+The tool is the one built from `--tool-dir` (default: the CONFLICT_STATIC_ANALYSIS_DIR
+environment variable; the conflict-static-analysis checkout), run inside the `conflict-analysis-runner` image (docker/Dockerfile:
 the tool's own Docker environment, Ubuntu 22.04 + OpenJDK 8 + Maven). Results go
 to `<results-dir>/<scenario>/<jar>/<direction>/<mode>/`: `changes.csv`,
 `console.txt`, `status.json` and, when something was found, `out.json`.
@@ -41,6 +41,7 @@ import argparse
 import functools
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -59,7 +60,7 @@ from src.parsing.modified_lines_parser import has_attributed_lines, load_modifie
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "conflict-analysis-runner"
-DEFAULT_TOOL_DIR = Path(r"D:\Arquivos\Documentos\Mestrado\agentes\repos\conflict-static-analysis")
+TOOL_DIR_ENV = "CONFLICT_STATIC_ANALYSIS_DIR"  # the tool's checkout, when --tool-dir is not given
 MODES = MODE_OF_TYPE
 DIRECTIONS = ("left-right", "right-left")
 BUILD_DIRS = ("original-without-dependencies", "original")
@@ -76,6 +77,18 @@ def log(message: str) -> None:
 
 
 # --- the tool and the image ---------------------------------------------------------
+
+
+def add_tool_dir_argument(parser: argparse.ArgumentParser, help_text: str) -> None:
+    """Adds `--tool-dir`, which falls back to the CONFLICT_STATIC_ANALYSIS_DIR environment variable."""
+    parser.add_argument("--tool-dir", default=os.environ.get(TOOL_DIR_ENV), help=f"{help_text} (default: ${TOOL_DIR_ENV}).")
+
+
+def resolve_tool_dir(parser: argparse.ArgumentParser, value: str | None) -> Path:
+    """The tool's checkout from `--tool-dir`, or an error telling how to give it."""
+    if not value:
+        parser.error(f"the tool's checkout is needed: pass --tool-dir or set {TOOL_DIR_ENV}")
+    return Path(value)
 
 
 def find_tool_jar(tool_dir: Path) -> Path | None:
@@ -352,7 +365,7 @@ def start_background(
     dataset_dir: Path,
     mergedataset: Path,
     results_dir: Path,
-    tool_dir: Path = DEFAULT_TOOL_DIR,
+    tool_dir: Path,
     only: list[str] | None = None,
     jobs: int = 2,
     timeout: int = 1800,
@@ -378,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mergedataset", required=True, help="Path to the MergeDataSet checkout (its jars are analysed).")
     parser.add_argument("--dataset-dir", default="dataset", help="Output of prepare_dataset (default: dataset).")
     parser.add_argument("--results-dir", default="results/analysis", help="Where to write results (default: results/analysis).")
-    parser.add_argument("--tool-dir", default=str(DEFAULT_TOOL_DIR), help="The conflict-static-analysis checkout.")
+    add_tool_dir_argument(parser, "The conflict-static-analysis checkout")
     parser.add_argument("--build-tool", action="store_true", help="Build the tool's jar in Docker first (needs ~/.m2/settings.xml).")
     parser.add_argument("--settings", default=str(Path.home() / ".m2" / "settings.xml"), help="Maven settings with the GitHub packages credentials (for --build-tool).")
     parser.add_argument("--only", nargs="+", help="Only scenarios whose folder name contains one of these strings.")
@@ -389,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="Run again even if a result exists.")
     args = parser.parse_args(argv)
 
-    tool_dir = Path(args.tool_dir)
+    tool_dir = resolve_tool_dir(parser, args.tool_dir)
     if args.build_tool:
         build_tool(tool_dir, Path(args.settings))
     analysis = start_background(

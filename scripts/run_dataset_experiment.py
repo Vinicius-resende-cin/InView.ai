@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.compare_analysis import full_report as build_analysis_report
 from scripts.evaluate_by_method import main as evaluate_by_method
-from scripts.run_static_analysis import DEFAULT_TOOL_DIR, start_background as start_analysis, summarize as summarize_analysis
+from scripts.run_static_analysis import add_tool_dir_argument, resolve_tool_dir, start_background as start_analysis, summarize as summarize_analysis
 from src.analysis.common import outcome
 from src.compare import load_llm_result
 from src.config import AppConfig, load_config
@@ -143,13 +143,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--analysis-timeout", type=int, default=1800, help="Seconds per tool run (default: 1800, as in the study).")
     parser.add_argument("--analysis-heap", default="3g", help="JVM heap per tool run (default: 3g).")
     parser.add_argument("--force-analysis", action="store_true", help="Run the tool again even where --analysis-results-dir already has a result.")
-    parser.add_argument("--tool-dir", default=str(DEFAULT_TOOL_DIR), help="The conflict-static-analysis checkout, with its jar built.")
+    add_tool_dir_argument(parser, "The conflict-static-analysis checkout, with its jar built (for --with-analysis)")
     args = parser.parse_args(argv)
 
     if args.runs < 1:
         parser.error("--runs must be at least 1")
     if args.with_analysis and not args.mergedataset:
         parser.error("--with-analysis needs --mergedataset")
+    tool_dir = resolve_tool_dir(parser, args.tool_dir) if args.with_analysis else None
 
     base = load_config(args.config)
     results_dir = Path(args.results_dir)
@@ -161,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.with_analysis:
         analysis = start_analysis(
             Path(args.dataset_dir), Path(args.mergedataset), Path(args.analysis_results_dir),
-            Path(args.tool_dir), args.only, args.analysis_jobs, args.analysis_timeout,
+            tool_dir, args.only, args.analysis_jobs, args.analysis_timeout,
             args.analysis_heap, args.force_analysis,
         )
 
