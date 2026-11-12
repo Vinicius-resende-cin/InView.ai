@@ -59,7 +59,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.evaluate_by_method import (
+from src.javaspans import (
     CONSTRUCTOR_NAMES,
     MethodSpan,
     find_method,

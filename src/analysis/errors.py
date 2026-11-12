@@ -14,7 +14,8 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-MODE_TYPE = {"svfa-interprocedural": "DF", "dfp-confluence-interprocedural": "CF", "ioa": "OA"}
+from src.analysis.common import TYPE_OF_MODE, TYPES
+from src.analysis.loaders import load_tool
 
 # key, pattern in console.txt, title, explanation, what can be done, where the problem is
 CAUSES = [
@@ -36,9 +37,11 @@ CAUSES = [
     ("no-fasthierarchy", r"no active FastHierarchy",
      "`RuntimeException: no active FastHierarchy present for scene` (Soot)",
      "Soot's Spark call-graph builder asked for the class hierarchy and the scene had none, because Soot loaded no classes. This "
-     "happens when none of the jars given to the tool contains the analysed class (for example spring-boot `c93ea54e`: its class is in no "
-     "readable jar of the dataset's build, and the runner falls back to passing the build directory).",
-     "A data problem: the dataset's build does not contain the class. Nothing to run.",
+     "happens when none of the jars of the merge build contains the analysed class. For spring-boot `c93ea54e` the merge's "
+     "`spring-boot-autoconfigure` jar has 10 entries (only META-INF) and its `buildFinal.jar` has no `org/springframework/boot/autoconfigure` "
+     "class at all (the left build is the same), so the runner falls back to passing the build directory. The class exists only in the "
+     "base/right builds (version 1.3.3), which are a different version of the code, not the merge.",
+     "A data problem: the dataset's merge build does not contain the class (analysing the right jar instead would analyse other code, whose lines do not match the merge). Nothing to run.",
      "the dataset's build"),
     ("path-joined", r"The path '",
      "`Error: The path '<dir>:<jar>:...'` (Soot, in `ioa`)",
@@ -94,8 +97,6 @@ def collect(analysis_dir: Path) -> tuple[list[dict], Counter]:
 
 
 def build_errors_report(analysis_dir: Path) -> str:
-    from scripts.compare_analysis import TYPES, load_tool  # lazy: compare_analysis imports this module
-
     errors, states = collect(analysis_dir)
     by_cause: dict[str, list[dict]] = defaultdict(list)
     for e in errors:
@@ -119,7 +120,7 @@ def build_errors_report(analysis_dir: Path) -> str:
     for key, _, title, _, _, where in CAUSES:
         items = by_cause.get(key, [])
         if items:
-            modes = sorted({MODE_TYPE.get(e["mode"], e["mode"]) for e in items})
+            modes = sorted({TYPE_OF_MODE.get(e["mode"], e["mode"]) for e in items})
             out.append(f"| {title} | {len(items)} | {len({e['scenario'] for e in items})} | {', '.join(modes)} | {where} |")
     if by_cause.get("other"):
         out.append(f"| Other (not classified) | {len(by_cause['other'])} | {len({e['scenario'] for e in by_cause['other']})} | | unknown |")
@@ -132,11 +133,11 @@ def build_errors_report(analysis_dir: Path) -> str:
         out += [f"## {title}", "", f"{len(items)} runs in {len({e['scenario'] for e in items})} scenarios.", "",
                 f"**Explanation.** {explanation}", "", f"**What can be done.** {remedy}", "",
                 "| Scenario | Jar | Direction | Analysis | Seconds |", "|---|---|---|---|---|"]
-        out += [f"| {e['scenario']} | {e['jar']} | {e['direction']} | {MODE_TYPE.get(e['mode'], e['mode'])} ({e['mode']}) | {e['seconds']} |" for e in items]
+        out += [f"| {e['scenario']} | {e['jar']} | {e['direction']} | {TYPE_OF_MODE.get(e['mode'], e['mode'])} ({e['mode']}) | {e['seconds']} |" for e in items]
         out.append("")
     if by_cause.get("other"):
         out += ["## Not classified", "", "| Scenario | Jar | Direction | Analysis | Last console lines |", "|---|---|---|---|---|"]
-        out += [f"| {e['scenario']} | {e['jar']} | {e['direction']} | {MODE_TYPE.get(e['mode'], e['mode'])} | {e['tail']} |" for e in by_cause["other"]]
+        out += [f"| {e['scenario']} | {e['jar']} | {e['direction']} | {TYPE_OF_MODE.get(e['mode'], e['mode'])} | {e['tail']} |" for e in by_cause["other"]]
         out.append("")
 
     out += ["## (scenario, type) pairs left out of the comparison", "", "| Scenario | Type left out |", "|---|---|"]

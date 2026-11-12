@@ -17,11 +17,9 @@ import csv
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from src.analysis.common import pct, text_table
+
 OUTCOMES = ("TP", "FN", "FP", "TN")
-
-
-def rate(numerator: int, denominator: int) -> str:
-    return f"{numerator / denominator:.0%}" if denominator else "n/a"
 
 
 def summarize(models: list[str], cells: dict[tuple, dict[str, dict]], keys: list[tuple]) -> list[list[str]]:
@@ -30,30 +28,22 @@ def summarize(models: list[str], cells: dict[tuple, dict[str, dict]], keys: list
     for model in models:
         tally = Counter(cells[k][model]["outcome"] for k in keys if model in cells[k])
         tp, fn, fp, tn = (tally[o] for o in OUTCOMES)
-        precision, recall = rate(tp, tp + fp), rate(tp, tp + fn)
-        f1 = rate(2 * tp, 2 * tp + fp + fn)
+        precision, recall = pct(tp, tp + fp), pct(tp, tp + fn)
+        f1 = pct(2 * tp, 2 * tp + fp + fn)
         out.append(
             [
                 model,
                 str(sum(1 for k in keys if model in cells[k])),
                 str(tp), str(fn), str(fp), str(tn),
                 str(tally["unlabeled"]), str(tally["no valid runs"]),
-                precision, recall, rate(tn, tn + fp), rate(tp + tn, tp + tn + fp + fn), f1,
+                precision, recall, pct(tn, tn + fp), pct(tp + tn, tp + tn + fp + fn), f1,
             ]
         )
     return out
 
 
 def print_table(header: list[str], rows: list[list[str]], align_right: set[int] = frozenset()) -> None:
-    widths = [max(len(str(r[i])) for r in [header, *rows]) for i in range(len(header))]
-    def fmt(row: list[str]) -> str:
-        return "  ".join(
-            str(c).rjust(widths[i]) if i in align_right else str(c).ljust(widths[i]) for i, c in enumerate(row)
-        )
-    print(fmt(header))
-    print("  ".join("-" * w for w in widths))
-    for row in rows:
-        print(fmt(row))
+    print(text_table(header, rows, align_right))
 
 
 def main(argv: list[str] | None = None) -> int:

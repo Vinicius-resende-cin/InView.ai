@@ -37,10 +37,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.compare_analysis import full_report as build_analysis_report
 from scripts.evaluate_by_method import main as evaluate_by_method
-from scripts.run_experiment import resolve_model_spec, run_once, sanitize_model_name
 from scripts.run_static_analysis import DEFAULT_TOOL_DIR, start_background as start_analysis, summarize as summarize_analysis
+from src.analysis.common import outcome
 from src.compare import load_llm_result
 from src.config import AppConfig, load_config
+from src.experiment import resolve_model_spec, run_once, sanitize_model_name
 from src.parsing.modified_lines_parser import has_attributed_lines, load_modified_lines
 
 
@@ -107,16 +108,6 @@ def count_detected(output_path: Path) -> int | None:
     except (ValueError, OSError) as exc:
         print(f"    warning: {exc}", file=sys.stderr)
         return None
-
-
-def outcome(label: str, llm_flagged: bool) -> str:
-    """Confusion-matrix cell of the LLM against the interference label
-    ('Yes' = positive); 'unlabeled' when the label is neither Yes nor No."""
-    if label not in ("Yes", "No"):
-        return "unlabeled"
-    if label == "Yes":
-        return "TP" if llm_flagged else "FN"
-    return "FP" if llm_flagged else "TN"
 
 
 def main(argv: list[str] | None = None) -> int:

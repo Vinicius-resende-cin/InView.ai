@@ -54,16 +54,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.analysis.common import MODE_OF_TYPE
 from src.parsing.modified_lines_parser import has_attributed_lines, load_modified_lines
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "conflict-analysis-runner"
 DEFAULT_TOOL_DIR = Path(r"D:\Arquivos\Documentos\Mestrado\agentes\repos\conflict-static-analysis")
-MODES = {
-    "DF": "svfa-interprocedural",
-    "CF": "dfp-confluence-interprocedural",
-    "OA": "ioa",
-}
+MODES = MODE_OF_TYPE
 DIRECTIONS = ("left-right", "right-left")
 BUILD_DIRS = ("original-without-dependencies", "original")
 
