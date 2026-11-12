@@ -8,7 +8,14 @@ the same line — the kind of conflict a textual (git) merge cannot detect.
 Given a diff and per-line authorship, the agent reads the full source files
 involved (not just the diff hunks) and either detects these dependencies
 itself, or reviews dependencies already reported by a static-analysis tool.
-Results can then be scored against that tool's own output.
+
+There are two ways to use it:
+
+- **One scenario** — run the pipeline on a single diff and score the result
+  against a static-analysis tool's output ([Usage](#usage)).
+- **A whole dataset** — prepare the dataset, run several models and the
+  static-analysis tool on every scenario, and compare them
+  ([Dataset experiments](#dataset-experiments)).
 
 ## Index
 
@@ -17,14 +24,21 @@ Results can then be scored against that tool's own output.
 - [How it works](#how-it-works)
   - [Agent backends](#agent-backends)
   - [Reading the real source, not just the diff](#reading-the-real-source-not-just-the-diff)
-- [Project structure](#project-structure)
-  - [Static-analysis input format (Mode 2)](#static-analysis-input-format-mode-2)
 - [Installation](#installation)
-  - [Using the ollama provider](#using-the-ollama-provider)
-  - [Adding ollama models](#adding-ollama-models)
+  - [Using the Ollama provider](#using-the-ollama-provider)
 - [Usage](#usage)
-  - [Comparing against static analysis](#comparing-against-static-analysis)
-  - [Running a multi-model experiment](#running-a-multi-model-experiment)
+  - [Commands at a glance](#commands-at-a-glance)
+  - [Running one scenario](#running-one-scenario)
+  - [Mode 2 input format](#mode-2-input-format)
+  - [Comparing one run with static analysis](#comparing-one-run-with-static-analysis)
+  - [Running several models on one scenario](#running-several-models-on-one-scenario)
+- [Dataset experiments](#dataset-experiments)
+  - [1. Prepare the dataset](#1-prepare-the-dataset)
+  - [2. Run the static-analysis tool](#2-run-the-static-analysis-tool)
+  - [3. Run the agents](#3-run-the-agents)
+  - [4. Score and compare](#4-score-and-compare)
+  - [Re-running](#re-running)
+- [Project structure](#project-structure)
 - [Implementation notes](#implementation-notes)
 - [License](#license)
 
@@ -34,13 +48,13 @@ Definitions are adapted from Jesus et al., *"Comparing static analyses for
 improved semantic conflict detection"* (Automated Software Engineering,
 2026). The pipeline targets three dependency types:
 
-- **Direct Flow** — a value written or used in a line changed by one
+- **Direct Flow (DF)** — a value written or used in a line changed by one
   developer flows (through data flow) to a state element written or used in
   a line changed by the other.
-- **Overriding Assignment** — a state element written by one developer is
+- **Overriding Assignment (OA)** — a state element written by one developer is
   later overwritten by the other, with no intermediate write from the common
   base version, silently discarding one change's effect.
-- **Confluence Flow** — data-flow paths from each developer's distinct
+- **Confluence Flow (CF)** — data-flow paths from each developer's distinct
   changes converge at a common program point affecting the same state
   element, even though they modified different variables initially.
 
@@ -56,89 +70,174 @@ The full definitions used in prompts live in `config.yaml` under
   one is a genuine risk or safe/benign, and may flag anything it noticed on
   its own.
 
+The experiment scripts and the dataset workflow use Mode 1 only.
+
 ## How it works
 
 The pipeline (`src/graph.py`) is a fixed sequence of four steps:
 
-1. **`load_inputs`** — parses the diff (`src/parsing/diff_parser.py`),
-   per-line authorship (`src/parsing/modified_lines_parser.py`), and, in
-   Mode 2, the static-analysis tool's findings
-   (`src/parsing/dependency_parser.py`); joins the diff with authorship into
-   an annotated diff (`src/parsing/annotate.py`).
+1. **`load_inputs`** — parses the diff, per-line authorship and, in Mode 2,
+   the static-analysis findings (`src/parsing/`), and joins diff and
+   authorship into an annotated diff.
 2. **`build_prompt`** — renders the annotated diff, dependency-type
-   definitions, and (Mode 2) precomputed dependencies into a system/human
+   definitions and (Mode 2) precomputed dependencies into a system/human
    prompt pair (`src/prompts/`).
-3. **`call_agent`** — sends that prompt to an agent backend and gets back a
+3. **`call_agent`** — sends the prompt to an agent backend and gets back a
    structured, schema-validated result (`src/clients/`).
 4. **`save_output`** — writes `{mode, result, raw_response, parse_error}` as
    JSON to `output.path` (`src/output.py`).
 
-The result schema (`src/schemas.py`, `Mode1Result`/`Mode2Result`) is enforced
-by the backend itself, not parsed out of free text after the fact.
+The result schema (`src/schemas.py`) is enforced by the backend itself, not
+parsed out of free text afterwards.
 
 ### Agent backends
 
-Two backends implement the same interface (`src/clients/base.py`,
-`AgentClient`), selected via `agent.backend` in `config.yaml`:
+Two backends implement the same interface (`AgentClient`), selected with
+`agent.backend` in `config.yaml`:
 
 - **`opencode`** (default) — talks to an [opencode](https://opencode.ai)
   server. Supports any `llm.provider` (Ollama, Gemini, OpenRouter,
-  Anthropic), each via its own API key. Two subagents are defined in
-  `opencode.json`: `dependency-detector` (Mode 1) and `dependency-reviewer`
-  (Mode 2), both restricted to read-only tools (`read`/`grep`/`glob`).
-  A companion skill (`.opencode/skills/semantic-dependency-review/`)
-  instructs the agent to read the real source files before answering, and to
-  call the `StructuredOutput` tool as its final action.
+  Anthropic), each with its own credentials. `opencode.json` defines two
+  read-only subagents (`read`/`grep`/`glob` only): `dependency-detector`
+  (Mode 1) and `dependency-reviewer` (Mode 2). A skill in
+  `.opencode/skills/semantic-dependency-review/` tells the agent to read the
+  real source files and to finish by calling the `StructuredOutput` tool.
 
-- **`claude_code`** — shells out to the `claude` CLI headlessly instead
-  (`claude -p ...`). This is the only integration path allowed to use a
-  Claude Pro/Max **subscription** login rather than a pay-per-token API key:
-  Anthropic's terms restrict subscription auth to Anthropic's own
-  first-party clients, which rules out both opencode and `claude-agent-sdk`
-  (the official Python/TS SDK) for that purpose — only the CLI itself
-  qualifies. The companion skill lives at
-  `.claude/skills/semantic-dependency-review/`, auto-discovered by Claude
-  Code with no extra setup.
+- **`claude_code`** — runs the `claude` CLI headlessly (`claude -p ...`).
+  This is the only integration allowed to use a Claude Pro/Max
+  **subscription** login instead of a pay-per-token API key: Anthropic's
+  terms limit subscription auth to its own first-party clients, which rules
+  out opencode and the Agent SDK. The skill lives in
+  `.claude/skills/semantic-dependency-review/` and is discovered
+  automatically. `llm.provider` is ignored; it always talks to Claude.
 
 Both backends retry (a fresh attempt each time, up to `agent.max_retries`
-extra attempts) if a run doesn't come back with schema-valid structured
-output — models vary a lot in how reliably they end their turn with an
-actual structured result instead of free-form text.
+extra attempts) when a run doesn't end with schema-valid structured output,
+since models vary in how reliably they do that.
 
 ### Reading the real source, not just the diff
 
-Setting `input.source_root` to a checkout of the codebase the diff applies
-to scopes the agent's read/grep/glob tools to that directory, so it can open
-full files instead of reasoning from the diff hunk alone (which often omits
-the declarations, other methods, or superclasses a dependency depends on).
-Leave it unset to fall back to diff-only reasoning.
+Set `input.source_root` to a checkout of the code the diff applies to, and
+the agent's read/grep/glob tools are scoped to that directory, so it can open
+full files instead of reasoning from the hunk alone (which often omits the
+declarations, other methods or superclasses a dependency depends on). Leave
+it unset to fall back to diff-only reasoning.
 
-## Project structure
+## Installation
+
+1. Install the Python dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+2. Set up **one** agent backend (`agent.backend`); skip the other.
+
+   **Option A — `opencode`** (API keys, many providers)
+
+   - Install [opencode](https://opencode.ai/docs) and Node.js.
+   - Sync this project's agents and skills into opencode's global config
+     (see [Implementation notes](#implementation-notes) for why):
+     ```
+     python scripts/install_opencode_config.py
+     ```
+     Re-run it after editing `opencode.json` or `.opencode/skills/`.
+   - Log in to the provider you'll use:
+     `opencode auth login --provider <gemini|openrouter|anthropic>`.
+     Ollama has its own login, below.
+
+   **Option B — `claude_code`** (Claude Pro/Max subscription)
+
+   - Install [Claude Code](https://code.claude.com/docs/quickstart).
+   - Log in once with `claude`, or on a headless machine with
+     `claude setup-token`.
+
+The [dataset experiments](#dataset-experiments) need a few more tools; they
+are listed there.
+
+### Using the Ollama provider
+
+`llm.provider: ollama` works with the `opencode` backend only. Use it to
+avoid per-token costs, keep the code on your machine, or try open-weight
+models.
+
+1. Install Ollama and `ollama pull <tag>` the model.
+2. Set `llm.provider: ollama` and `llm.model: <tag>` in `config.yaml`.
+3. For `*-cloud` tags, log in with `ollama signin` (Ollama's own login,
+   unrelated to `opencode auth`). Fully local models need no login.
+
+`opencode.json` already registers `gemma4:31b-cloud`, `gpt-oss:20b-cloud`,
+`gpt-oss:120b-cloud` and `nemotron-3-super:cloud`. Any other tag must be
+added under `provider.ollama.models` (the key is the exact tag from
+`ollama list`; `name` is only a label):
+
+```json
+"provider": { "ollama": { "models": {
+  "qwen2.5-coder:14b": { "name": "Qwen2.5 Coder 14B" }
+} } }
+```
+
+Then run `ollama pull <tag>` (also needed for `*-cloud` tags, which registers
+the alias without downloading weights), re-run
+`python scripts/install_opencode_config.py`, restart any running
+`opencode serve`, and set `llm.model` to the tag.
+
+## Usage
+
+### Commands at a glance
+
+All commands run from the repository root.
+
+| Command | What it does |
+|---|---|
+| `python -m src.cli` | Runs the pipeline on one scenario |
+| `python -m src.compare` | Scores one Mode 1 output against the tool's findings |
+| `python -m scripts.run_experiment` | Runs several models N times on one scenario |
+| `python scripts/install_opencode_config.py` | Syncs `opencode.json` and skills into opencode's global config |
+| `python -m scripts.prepare_dataset` | Turns the MergeDataset into per-scenario inputs |
+| `python -m scripts.run_static_analysis` | Runs the static-analysis tool on those scenarios, in Docker |
+| `python -m scripts.run_dataset_experiment` | Runs the agents on every scenario (optionally with the tool) |
+| `python -m scripts.evaluate_by_method` | Scores finished runs per labeled method |
+| `python -m scripts.show_method_summary` | Prints that per-method score as a table |
+| `python -m scripts.compare_analysis` | Compares the tool and the agents (no ground truth) |
+| `python -m scripts.compare_ground_truth` | Scores both against the manual analysis |
+
+Every command accepts `--help`.
+
+### Running one scenario
+
+Edit `config.yaml`:
+
+```yaml
+mode: detect                # or: review
+llm:
+  provider: anthropic       # ollama | gemini | openrouter | anthropic
+  model: sonnet             # alias or full model name
+input:
+  diff_file: samples/diff.txt
+  modified_lines_file: samples/modified-lines.txt
+  dependencies_file: samples/dependencies.sample.json  # required for mode: review
+  source_root: /path/to/checked-out/repo               # optional
+agent:
+  backend: claude_code      # or: opencode
+output:
+  path: results/output.json
+```
+
+The `config.yaml` in the repository is a working starting point (opencode +
+Ollama); the values above are only an example. Then run:
 
 ```
-config.yaml                    Pipeline configuration (mode, LLM, inputs, agent backend)
-opencode.json                  opencode plugin/provider/subagent config (Mode 1 & 2)
-scripts/
-  install_opencode_config.py   Syncs opencode.json + .opencode/skills/ into opencode's global config
-.opencode/skills/               Review skill for the opencode backend
-.claude/skills/                 Review skill for the claude_code backend
-samples/                       Example diff, authorship, and static-analysis output
-src/
-  cli.py                       Entry point: `python -m src.cli --config config.yaml`
-  compare.py                   Scores a Mode 1 output against the static-analysis tool's findings
-  config.py                    YAML config schema and loading
-  graph.py                     The four-step pipeline
-  output.py                    Writes the pipeline's result to JSON
-  schemas.py                   Pydantic schemas for the agent's structured output
-  parsing/                     Diff, authorship, and static-analysis-output parsers
-  prompts/                     Renders parsed inputs into system/human prompt text
-  clients/                     Agent backends (opencode, claude_code) behind a common interface
+python -m src.cli --config config.yaml
 ```
 
-### Static-analysis input format (Mode 2)
+The output is `{mode, result, raw_response, parse_error}` at `output.path`.
+A non-null `parse_error` means the run failed after all retries;
+`raw_response` holds what the model actually said.
+
+### Mode 2 input format
 
 `input.dependencies_file` is a JSON array of raw findings from the
-static-analysis tool, e.g.:
+static-analysis tool (`samples/dependencies.sample.json` is a full example):
 
 ```json
 [
@@ -161,266 +260,275 @@ static-analysis tool, e.g.:
 ]
 ```
 
-`src/parsing/dependency_parser.py` classifies each finding into one of the
-three target types by inspecting `type`/`label` (contains "OA" ->
-Overriding Assignment; contains "CF" -> Confluence Flow; `type == "CONFLICT"`
-or contains "SVFA" -> Direct Flow) and drops anything else as out of scope.
-Exact-duplicate findings (the tool is known to repeat entries) are collapsed
-to one. Each interference node's `branch` field ("L"/"R") is often empty; in
-that case, authorship is resolved by matching each stack-trace frame's
-(class, line) against the `modified-lines.txt` data, since these line
-numbers correspond to the merged version.
+`src/parsing/dependency_parser.py` classifies each finding by `type`/`label`
+(contains "OA" → Overriding Assignment; contains "CF" → Confluence Flow;
+`type == "CONFLICT"` or contains "SVFA" → Direct Flow) and drops anything
+else. Exact duplicates are collapsed. An interference node's `branch`
+("L"/"R") is often empty; then authorship is resolved by matching each
+stack-trace frame's (class, line) against `modified-lines.txt`, since those
+line numbers belong to the merged version.
 
-## Installation
+### Comparing one run with static analysis
 
-1. **Python dependencies**
-   ```
-   pip install -r requirements.txt
-   ```
-
-2. **Pick one agent backend** and set it up — see [Agent backends](#agent-backends)
-   for what each one is and when to use it. You only need to follow the
-   steps for the backend you intend to use (`agent.backend` in
-   `config.yaml`); the other backend's setup can be skipped entirely.
-
-   <b>Option A — <code>opencode</code></b> (default, pay-per-token API keys, multiple providers)
-
-   - Install [opencode](https://opencode.ai/docs) and Node.js.
-   - Sync this project's agent/skill config into opencode's global config
-     (needed because opencode scopes both config discovery and tool-root
-     access to the same target directory — see *Implementation notes*):
-     ```
-     python scripts/install_opencode_config.py
-     ```
-   - Authenticate whichever `llm.provider` you'll use:
-     `opencode auth login --provider <gemini|openrouter|anthropic>`. Ollama
-     doesn't go through opencode's auth — see below.
-
-   <b>Option B — <code>claude_code</code></b> (Claude Pro/Max subscription login)
-
-   - Install [Claude Code](https://code.claude.com/docs/quickstart).
-   - Log in once: interactively (`claude`), or on a headless machine,
-     `claude setup-token` (requires a Claude subscription).
-
-### Using the Ollama provider
-
-`llm.provider: ollama` is one of the four
-`llm.provider` choices (alongside `gemini`, `openrouter`, `anthropic`) and
-only applies to the `opencode` backend — `claude_code` always talks to
-Claude, regardless of `llm.provider`. It's worth reaching for when you
-want to avoid pay-per-token API costs, keep the diff/source files on your
-own machine instead of sending them to a hosted API, or just experiment
-with an open-weight model:
-
-- How to use it: install Ollama, `ollama pull <tag>` the model you want,
-  then set `llm.provider: ollama` and `llm.model: <tag>` in
-  `config.yaml`. Two Ollama-cloud models (`gemma4:31b-cloud`,
-  `gpt-oss:20b-cloud`) are already registered in `opencode.json`; any
-  other tag needs to be added first — see
-  [Adding Ollama models](#adding-ollama-models).
-- Login: not needed for models running fully locally. For
-  Ollama-cloud-proxied tags (the `*-cloud` suffixed ones above), run
-  `ollama signin` instead — that's Ollama's own login, unrelated to
-  `opencode auth`.
-
-### Adding Ollama models
-
-The `opencode` backend's Ollama models aren't auto-discovered; each one
-needs an entry in `opencode.json` under `provider.ollama.models`:
-
-```json
-"provider": {
-  "ollama": {
-    "models": {
-      "qwen2.5-coder:14b": { "name": "Qwen2.5 Coder 14B" }
-    }
-  }
-}
-```
-
-The key is the exact model tag Ollama uses (`ollama list` to check), the
-`name` is just a display label. Then:
-
-1. Make sure Ollama actually has that model: `ollama pull <tag>` (this is
-   also required for Ollama-cloud-proxied tags, e.g. `*-cloud` suffixed
-   models — pulling registers the alias even though no weights are
-   downloaded locally).
-2. Re-sync opencode's global config: `python scripts/install_opencode_config.py`,
-   then restart any running `opencode serve`.
-3. Point `config.yaml`'s `llm.model` at the new tag.
-
-## Usage
-
-Edit `config.yaml`:
-
-```yaml
-mode: detect                # or: review
-llm:
-  provider: anthropic       # ollama | gemini | openrouter | anthropic
-  model: sonnet             # alias or full model name
-input:
-  diff_file: samples/diff.txt
-  modified_lines_file: samples/modified-lines.txt
-  dependencies_file: samples/dependencies.sample.json  # required for mode: review
-  source_root: /path/to/checked-out/repo               # optional
-agent:
-  backend: claude_code       # or: opencode
-output:
-  path: results/output.json
-```
-
-Run it:
-
-```
-python -m src.cli --config config.yaml
-```
-
-Output is written to `output.path` as `{mode, result, raw_response,
-parse_error}`. A non-null `parse_error` means the run failed after
-exhausting retries; `raw_response` holds whatever the model actually said,
-for debugging.
-
-### Comparing against static analysis
-
-For Mode 1 output, score it against the static-analysis tool's own
-dependencies:
+Score a Mode 1 output against the tool's dependencies:
 
 ```
 python -m src.compare --config config.yaml --llm-output results/output.json --out comparison.csv
 ```
 
-This matches dependencies by type and by overlapping (class, line) sets
-(greedy, largest overlap first) and reports how many were found by both,
-only by the LLM, and only by the tool.
+`--dependencies` overrides `input.dependencies_file` from the config.
+Dependencies match when they have the same type and overlapping
+(class, line) sets (greedy, largest overlap first). The table reports how
+many were found by both, only by the LLM, and only by the tool.
 
-### Running a multi-model experiment
-
-`scripts/run_experiment.py` runs Mode 1 (`detect`) repeatedly across one or
-more models and compares each run against the static-analysis tool's
-findings, without having to hand-edit `config.yaml` between runs:
+### Running several models on one scenario
 
 ```
 python -m scripts.run_experiment --models gpt-oss:20b-cloud claude:sonnet --runs 5
 ```
 
-- **`--models`** — space-separated list of models to run. A plain name
-  (e.g. `gpt-oss:20b-cloud`) runs through the `opencode` backend with
-  `llm.provider` left as configured in the base config; a name prefixed
-  with `claude:` (e.g. `claude:sonnet`) is routed through the `claude_code`
-  backend instead, with everything after the prefix used as the model.
-- **`--runs`** (`-n`) — how many times to run Mode 1 per model.
-- **`--config`** — base YAML config to start from (default: `config.yaml`).
-  Only `mode`, `llm.model`, `agent.backend`, and `output.path` are
-  overridden per run; everything else (`input.*`, `llm.provider`, etc.)
-  stays as configured there.
-- **`--results-dir`** — where per-run folders are written, one per
-  `<model>_run<N>/` containing that run's `output.json` and `comparison.csv`
-  (default: `results`).
-- **`--dependencies`** — static-analysis dependencies JSON to score against;
-  defaults to the base config's `input.dependencies_file`.
-- **`--summary-out`** — where to write the summary CSV (default:
-  `<results-dir>/summary.csv`).
+- `--models` — models to run. A plain name goes through the `opencode`
+  backend (with `llm.provider` as configured); a `claude:` prefix
+  (`claude:sonnet`) goes through `claude_code` with the rest as the model.
+- `--runs` / `-n` — runs per model (required).
+- `--config` — base config (default `config.yaml`). Per run, only `mode`
+  (always `detect`), `llm.model`, `agent.backend` and `output.path` are
+  overridden.
+- `--results-dir` — where `<model>_run<N>/` folders go, each with
+  `output.json` and `comparison.csv` (default `results`).
+- `--dependencies` — tool findings to score against (default: the config's
+  `input.dependencies_file`).
+- `--summary-out` — summary CSV (default `<results-dir>/summary.csv`).
 
-A run that crashes or comes back with a `parse_error` is excluded from that
-model's scoring but doesn't abort the rest of the experiment. Once all runs
-finish, a summary table is printed and saved to `results/summary.csv`,
-showing the static-analysis tool's dependency count alongside each model's
-maximum, minimum, and median number of detected dependencies across its
-runs.
+A run that crashes or ends in `parse_error` is left out of that model's
+scoring without stopping the rest. The summary lists the tool's dependency
+count next to each model's maximum, minimum and median across its runs.
 
-### Running the static-analysis tool next to the agents
+## Dataset experiments
 
-`scripts/run_static_analysis.py` runs the [conflict-static-analysis](https://github.com/spgroup/conflict-static-analysis)
-tool on the same scenarios as the agents (`dataset/`, see `scripts/prepare_dataset.py`),
-inside Docker, with the three analyses that correspond to the dependency types:
+These commands run the whole study on the MergeDataSet: the agents and the
+static-analysis tool on every scenario, then a comparison.
 
-| Type | Analysis (`-mode`) |
-|---|---|
-| Direct Flow (DF) | `svfa-interprocedural` |
-| Confluence Flow (CF) | `dfp-confluence-interprocedural` |
-| Overriding Assignment (OA) | `ioa` |
+**Extra prerequisites**
 
-Each one runs in both directions (the left lines as sinks and the right lines as
-sources, then the other way round), on the merge's jar from the dataset's
-`original-without-dependencies` build, with a 30-minute timeout per run, as in the
-study. A scenario whose classes are in different jars gets one run per jar.
+- A checkout of the **MergeDataset** (its jars are analysed; its CSVs are
+  read).
+- A checkout of **[conflict-static-analysis](https://github.com/spgroup/conflict-static-analysis)**.
+  Tell the scripts where it is with `--tool-dir`, or
+  once for all of them with the `CONFLICT_STATIC_ANALYSIS_DIR` environment
+  variable. There is no default: a command that needs the tool stops with a
+  message if neither is set.
+- **Docker**, and Maven's GitHub-packages credentials in `~/.m2/settings.xml`
+  (see the tool's README) — only to build the tool.
+- Optional, for exact Left/Right lines: Java and `diff` on `PATH`, and the
+  study's DiffJ jar.
+
+```
+ prepare_dataset ──► dataset/ ──┬──► run_static_analysis ──► results/analysis/ ──┐
+                                └──► run_dataset_experiment ► results/dataset/ ───┤
+                                                                                  ▼
+                     evaluate_by_method · compare_analysis · compare_ground_truth
+```
+
+### 1. Prepare the dataset
+
+```
+python -m scripts.prepare_dataset --dataset /.../mergedataset --out dataset --diffj /.../diffj.jar
+```
+
+A scenario is one merge commit with labeled methods in the dataset's
+`sample-semantic-conflicts.csv`. For each one, `dataset/<project>_<commit8>/`
+gets `diff.txt`, `modified-lines.txt`, `source/` (the merged classes, usable
+as `input.source_root`) and `scenario.json` (the labeled methods).
+
+- `--dataset` (required) — the MergeDataSet checkout. `--out` defaults to
+  `dataset`.
+- `--diffj` — DiffJ jar, used to compute the Left/Right lines with the
+  study's algorithm. Without it (or when DiffJ fails on a class) a
+  line-based approximation is used, and it is less exact.
+- `--validate` — only check the algorithm against the study's own results
+  (needs `--diffj`), then exit.
+- `--methods-csv`, `--labels-csv` — take scenarios, methods, lines and
+  labels from your own CSVs instead of the dataset's. See the script's
+  docstring for the column layout.
+
+After preparing, it lists labeled methods that ended up with no attributed
+lines. A scenario where no developer **added** a line is skipped by both the
+agents and the tool (deleted lines don't count: the tool takes added lines
+as its sources and sinks).
+
+### 2. Run the static-analysis tool
 
 ```
 python -m scripts.run_static_analysis --mergedataset /.../mergedataset --build-tool   # once
 python -m scripts.run_static_analysis --mergedataset /.../mergedataset --jobs 3
 ```
 
-`--build-tool` builds the tool from the `conflict-static-analysis` checkout (`--tool-dir`)
-in a container, with the `docker/Dockerfile` of this project (the tool's own Docker
-environment: Ubuntu 22.04, OpenJDK 8 and Maven 3.8.8, without its clones of the
-dataset). Maven needs the GitHub packages credentials of `~/.m2/settings.xml`
-(see the tool's README); the container sees that file read-only. Results go to
-`results/analysis/<scenario>/<jar>/<direction>/<mode>/` (`out.json`, `console.txt`,
-`status.json`); runs whose `status.json` exists are not repeated unless `--force`.
+The tool runs in Docker, with the three analyses that stand for the
+dependency types, each in both directions (left lines as sinks and right as
+sources, then the reverse) and a 30-minute timeout per run, as in the study:
 
-To run it **in parallel with the agents**, add `--with-analysis` to the experiment:
+| Type | `--modes` key | Analysis (`-mode`) |
+|---|---|---|
+| Direct Flow | `DF` | `svfa-interprocedural` |
+| Confluence Flow | `CF` | `dfp-confluence-interprocedural` |
+| Overriding Assignment | `OA` | `ioa` |
+
+The analysed jar is the merge's `original-without-dependencies` build; a
+scenario whose classes are in different jars gets one run per jar.
+
+- `--mergedataset` (required) — the MergeDataSet checkout.
+- `--build-tool` — build the tool's jar first, in a container made from
+  `docker/Dockerfile` (Ubuntu 22.04, OpenJDK 8, Maven 3.8.8). It reads
+  `--settings` (default `~/.m2/settings.xml`) read-only.
+- `--tool-dir` — the tool checkout (default: `$CONFLICT_STATIC_ANALYSIS_DIR`).
+- `--only` — scenarios whose folder name contains one of these strings.
+- `--modes` — only these analyses (default: all three).
+- `--jobs` (3), `--timeout` (1800 s), `--heap` (JVM heap, `3g`) — the largest
+  jars need more heap.
+- `--force` — repeat runs that already have a `status.json`.
+- `--dataset-dir`, `--results-dir` — default `dataset` and `results/analysis`.
+
+Results go to `results/analysis/<scenario>/<jar>/<direction>/<mode>/`
+(`out.json`, `console.txt`, `status.json`).
+
+### 3. Run the agents
+
+```
+python -m scripts.run_dataset_experiment --models claude:sonnet gpt-oss:20b-cloud --runs 3
+```
+
+Runs Mode 1 on every prepared scenario and, per scenario and model, writes
+`results/dataset/<scenario>/<model>_run<N>/output.json`, plus
+`dataset_summary.csv`. A scenario counts as flagged when the model reported
+at least one dependency in most of its runs; that is checked against the
+scenario's "Locally Observable Interference" label (Yes = positive) and
+printed as TP/FN/FP/TN per model.
+
+- `--models` (required), `--runs` / `-n` (default **1**) — as in
+  `run_experiment`.
+- `--config`, `--dataset-dir`, `--results-dir` (default `results/dataset`).
+- `--only` — scenarios whose folder name contains one of these strings.
+- `--skip-existing` — reuse valid `output.json` files already in
+  `--results-dir`; failed runs are run again.
+- `--evaluate-by-method` — also score per labeled method afterwards (see
+  [step 4](#4-score-and-compare)).
+- `--with-analysis` — also run the static-analysis tool **in parallel**, then
+  wait for it and print the full comparison report. Needs `--mergedataset`;
+  tuned by `--analysis-jobs` (2), `--analysis-timeout` (1800),
+  `--analysis-heap` (`3g`), `--analysis-results-dir`, `--force-analysis` and
+  `--tool-dir` (as above). Build the tool once with `run_static_analysis --build-tool`.
 
 ```
 python -m scripts.run_dataset_experiment --models claude:sonnet --runs 3 \
     --with-analysis --mergedataset /.../mergedataset
 ```
 
-(`--analysis-jobs`, `--analysis-timeout`, `--analysis-results-dir`, `--tool-dir` tune it.)
-At the end it waits for the tool and prints the full report: the two comparison tables
-below and a report of every run of the tool that ended in error (cause, explanation and
-what can be done). It is written to `results/analysis/comparison_report.txt` (the errors
-alone to `results/analysis/errors_report.md`, the per-scenario numbers to
-`comparison_by_scenario.csv`), and can be produced on its own with
-`python -m scripts.compare_analysis [--models claude-sonnet ...]`.
+### 4. Score and compare
 
-To redo everything from scratch (agents and tool, no result reused):
+**Per labeled method** — never calls a model; reads finished runs:
 
 ```
-python -m scripts.run_dataset_experiment --models claude:sonnet --runs 3     --with-analysis --force-analysis --evaluate-by-method     --mergedataset /.../mergedataset
+python -m scripts.evaluate_by_method [--models claude-sonnet ...]
+python -m scripts.show_method_summary [results/dataset/method_summary.csv]
 ```
 
-Leave out `--skip-existing` (the agents then run again and overwrite `results/dataset`);
-`--force-analysis` repeats the tool's runs too. `--analysis-heap` (3g by default) and
-`--analysis-jobs` tune the tool's memory, which the largest jars (druid) need raised.
+`evaluate_by_method` treats each labeled method as its own case: a method is
+detected in a run if some reported dependency has a left/right line inside
+the method's body in the merged source, and by a model if it is detected in
+most of its valid runs. It writes `<results-dir>/method_summary.csv`
+(`--out` to change; also `--dataset-dir`, `--results-dir`).
+`show_method_summary` prints that CSV as a table, with the outcomes per model
+over each model's own methods and over the methods every model has a valid
+result for (the fair comparison).
 
-There is no ground truth in this comparison: it sets the results of the tool and of
-the LLMs against each other. It has two parts: **(1)** how many dependencies each
-reported, and **(2)** how many *different* ones, where reports of one type that share
-a (class, line) count as one dependency, and how many of those the tool and each LLM
-agree on (`matched`) or added over each other (`tool only` / `LLM only`). A
-(scenario, type) pair is left out when one of that analysis's runs timed out or
-failed, since the tool's side would be incomplete. Build the tool from its branch
-`fix/confluence-report-crashes` (or a version with those fixes): without them the
-confluence analysis crashes on some scenarios after finding conflicts
-(`head()` of an empty list, a `NullPointerException` while printing a path) and its
-`out.json` is not valid JSON when a statement contains quotes or backslashes.
+**Tool vs agents, no ground truth:**
+
+```
+python -m scripts.compare_analysis [--models claude-sonnet ...]
+```
+
+Part 1 counts the dependencies each reported. Part 2 counts *different*
+ones (reports of one type sharing a (class, line) are one dependency) and how
+many the tool and each model agree on (`matched`) or added over the other
+(`tool only` / `LLM only`). A (scenario, type) pair is left out when any run
+of that analysis timed out or failed, since the tool's side would be
+incomplete. The report also lists every tool run that ended in error, with
+cause, explanation and what can be done. Files, in `<analysis-dir>`:
+`comparison_report.txt`, `errors_report.md`, `comparison_by_scenario.csv`
+(`--output`, `--csv` to change; also `--analysis-dir`, `--results-dir`,
+`--dataset-dir`). `run_dataset_experiment --with-analysis` produces the same
+report at the end.
+
+**Against the manual analysis (ground truth):**
+
+```
+python -m scripts.compare_ground_truth --manual "<spreadsheet>.csv" [--models claude-sonnet ...]
+```
+
+Scores the tool and each model per method and dependency type, against the
+researchers' manual analysis (the "Manual analysis of DF / CF / OA" columns;
+TRUE = positive). A pair is compared only when both sides have a result. It
+writes `ground_truth_report.md` (with the reason for every row it could not
+score) and `ground_truth_by_method.csv` in `<analysis-dir>`.
+
+### Re-running
+
+To redo everything from scratch, leave out `--skip-existing` (the agents run
+again and overwrite `results/dataset`) and add `--force-analysis` (the tool
+runs again too):
+
+```
+python -m scripts.run_dataset_experiment --models claude:sonnet --runs 3 \
+    --with-analysis --force-analysis --evaluate-by-method --mergedataset /.../mergedataset
+```
+
+## Project structure
+
+```
+config.yaml                    Pipeline configuration (mode, LLM, inputs, agent backend)
+opencode.json                  opencode provider and subagent config (Mode 1 & 2)
+docker/Dockerfile              Image the static-analysis tool is built and run in
+samples/                       Example diff, authorship and static-analysis output
+.opencode/skills/              Review skill for the opencode backend
+.claude/skills/                Review skill for the claude_code backend
+src/
+  cli.py                       Entry point of the pipeline
+  compare.py                   Scores a Mode 1 output against the tool's findings
+  config.py                    YAML config schema and loading
+  experiment.py                Model specs (`claude:` prefix) and one detect-mode run
+  graph.py                     The four-step pipeline
+  javaspans.py                 Line ranges of a Java source's methods; lookup of a labeled method
+  output.py                    Writes the pipeline's result to JSON
+  schemas.py                   Pydantic schemas of the agent's structured output
+  analysis/                    Shared by the comparison scripts
+    common.py                    Dependency types, run folders, outcomes, table formatting
+    loaders.py                   Readers of the tool's results and the agents' runs
+    errors.py                    Report of the tool's runs that ended in error
+  parsing/                     Diff, authorship and static-analysis-output parsers
+  prompts/                     Renders parsed inputs into system/human prompt text
+  clients/                     Agent backends (opencode, claude_code) behind one interface
+scripts/                       One file per command in the table above
+```
 
 ## Implementation notes
 
 - **opencode's global config.** opencode ties "which project config
-  applies" and "what directory the agent's tools operate in" to the same
-  `directory` request parameter. Since Mode 1/2 needs that directory to be
-  the merge scenario's own checkout (`input.source_root`), not this
-  project's own directory, the custom agents/provider/skill can't live in a
-  project-local `opencode.json` — they have to be merged into opencode's
-  global config instead, which loads regardless of the target directory.
-  `scripts/install_opencode_config.py` does that merge; re-run it after
-  editing `opencode.json` or `.opencode/skills/`.
+  applies" and "which directory the agent's tools operate in" to the same
+  `directory` parameter. Since the agent must work in the scenario's own
+  checkout (`input.source_root`), not this project's directory, the custom
+  agents, provider and skill can't live in a project-local `opencode.json`;
+  they are merged into opencode's global config, which loads regardless.
+  `scripts/install_opencode_config.py` does the merge.
 
-- **`opencode`/`claude` CLIs on Windows.** Both resolve to npm's `.CMD`
-  shims. `subprocess.Popen`/`.run` won't find a bare `"opencode"`/`"claude"`
-  the way a shell would, so both clients resolve the executable via
-  `shutil.which` first. `.CMD` files are also only launchable via
-  `cmd.exe /c`, which imposes two further limits: a process spawned through
-  it needs its whole tree killed (`taskkill /T /F` on Windows) since
-  `Popen.terminate()` only kills the `cmd.exe` wrapper, not opencode's actual
-  server child; and its command line is capped at roughly 8191 characters,
-  which the annotated diff and JSON schema would blow past as inline
-  arguments to `claude` — so the prompt goes over stdin and the system
-  prompt through a temp file (`--system-prompt-file`) instead.
-  `subprocess.run`'s default text encoding on Windows also isn't UTF-8,
-  which was silently corrupting non-ASCII characters in responses;
-  `src/clients/claude_code.py` sets `encoding="utf-8"` explicitly.
+- **`opencode` and `claude` on Windows.** Both are npm `.CMD` shims, so the
+  clients resolve them with `shutil.which`. Because they run through
+  `cmd.exe`, a spawned opencode server is stopped with `taskkill /T /F`
+  (`terminate()` would only kill the wrapper), and the roughly 8191-character
+  command-line limit is avoided by sending the prompt over stdin and the
+  system prompt through a temp file (`--system-prompt-file`).
+  `src/clients/claude_code.py` also sets `encoding="utf-8"`, since the
+  Windows default silently corrupted non-ASCII characters.
 
 ## License
 
