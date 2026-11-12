@@ -54,7 +54,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.parsing.modified_lines_parser import load_modified_lines
+from src.parsing.modified_lines_parser import has_attributed_lines, load_modified_lines
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "conflict-analysis-runner"
@@ -217,13 +217,13 @@ def plan_jobs(
             continue
         scenario = json.loads((scenario_dir / "scenario.json").read_text(encoding="utf-8"))
         authorship = load_modified_lines(scenario_dir / "modified-lines.txt")
+        if not has_attributed_lines(authorship):
+            continue  # nothing attributed: the agents skip this scenario too
         classes = {
             name: (sorted(a.left_added), sorted(a.right_added))
             for name, a in authorship.items()
             if a.left_added or a.right_added
         }
-        if not classes:
-            continue  # nothing attributed: the agents skip this scenario too
 
         commit_dir = mergedataset / scenario["project"] / scenario["commit"]
         build_dirs = [commit_dir / b / "merge" for b in BUILD_DIRS if (commit_dir / b / "merge").is_dir()]

@@ -89,3 +89,17 @@ def parse_modified_lines(text: str) -> dict[str, ClassAuthorship]:
 def load_modified_lines(path: str | Path) -> dict[str, ClassAuthorship]:
     """Read and parse a modified-lines.txt file."""
     return parse_modified_lines(Path(path).read_text(encoding="utf-8"))
+
+
+def has_attributed_lines(authorship: dict[str, ClassAuthorship], class_name: str | None = None) -> bool:
+    """True if a developer *added* any line, in any class or, with `class_name`, in that class
+    (a nested class counts as its outer one).
+
+    Deleted lines don't count: the static analysis takes the added lines as its sources and
+    sinks, and a scenario with none is skipped by both the agents and the tool."""
+    outer = class_name.split("$")[0] if class_name else None
+    return any(
+        a.left_added or a.right_added
+        for name, a in authorship.items()
+        if outer is None or name.split("$")[0] == outer
+    )

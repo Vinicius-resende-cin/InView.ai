@@ -41,7 +41,7 @@ from scripts.run_experiment import resolve_model_spec, run_once, sanitize_model_
 from scripts.run_static_analysis import DEFAULT_TOOL_DIR, start_background as start_analysis, summarize as summarize_analysis
 from src.compare import load_llm_result
 from src.config import AppConfig, load_config
-from src.parsing.modified_lines_parser import load_modified_lines
+from src.parsing.modified_lines_parser import has_attributed_lines, load_modified_lines
 
 
 def scenario_config(base: AppConfig, scenario_dir: Path) -> AppConfig:
@@ -58,15 +58,6 @@ def scenario_config(base: AppConfig, scenario_dir: Path) -> AppConfig:
                 }
             )
         },
-    )
-
-
-def has_attributed_lines(scenario_dir: Path) -> bool:
-    """True if the scenario's modified-lines file attributes any line to a developer."""
-    authorship = load_modified_lines(scenario_dir / "modified-lines.txt")
-    return any(
-        a.left_added or a.left_deleted or a.right_added or a.right_deleted
-        for a in authorship.values()
     )
 
 
@@ -202,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         scenario = json.loads((scenario_dir / "scenario.json").read_text(encoding="utf-8"))
         label = scenario["locally_observable_interference"]
-        if not has_attributed_lines(scenario_dir):
+        if not has_attributed_lines(load_modified_lines(scenario_dir / "modified-lines.txt")):
             print(f"\n=== {scenario_dir.name}: skipped (no attributed lines) ===")
             continue
         print(f"\n=== {scenario_dir.name} (interference: {label}) ===")
